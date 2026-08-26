@@ -1,0 +1,14 @@
+{
+  "name": "xita",
+  "version": "0.1.0",
+  "private": true,
+  "description": "XITA — AI-native Product OS (Human-Controlled, Agent-Operated)",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "compose:up": "docker compose up -d",
+    "compose:down": "docker compose down"
+  }
+}
