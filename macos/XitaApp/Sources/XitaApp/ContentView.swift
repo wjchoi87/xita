@@ -89,11 +89,11 @@ struct ContentView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(p.name)
-                            Text("\(model.changes(for: p.id).count) changes")
+                            Text("\(model.changes(for: p.id).count)개의 할 일")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(p.status).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                        Text(XUI.termStatus(p.status)).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     }
                     .tag(AppModel.Selection.product(p.id))
                 }
@@ -113,7 +113,7 @@ struct ContentView: View {
                 ForEach(activeChanges) { c in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.name)
-                        Text("\(c.product) · \(c.status)")
+                        Text("\(model.item("products", c.product)?.name ?? c.product) · \(XUI.termStatus(c.status))")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     .tag(AppModel.Selection.change(c.id))
@@ -136,7 +136,7 @@ struct ContentView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(w.name)
-                            Text(w.status).font(.caption2).foregroundStyle(.secondary)
+                            Text(XUI.termStatus(w.status)).font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
                         if w.isStale {
@@ -228,22 +228,22 @@ struct AgentsDashboardView: View {
                  * 에이전트 상태는 사람이 이 메뉴로 갱신하거나 CLI `xita agent-update`로 보낸다.
                  * AWAITING_INPUT/RESULT_READY/FAILED 는 Home Needs You 로 자동 승격된다(서버와 동일 규칙). */
                 XCard("Dispatches — 런 보드 (§40/§67)") {
-                    let ds = model.items.filter { $0.type == "dispatches" }
-                        .sorted { ($0.status.uppercased() == "AWAITING_INPUT" ? 0 : $0.status.uppercased() == "RESULT_READY" ? 1 : $0.status.uppercased() == "FAILED" ? 2 : 3, $0.id) < ($1.status.uppercased() == "AWAITING_INPUT" ? 0 : $1.status.uppercased() == "RESULT_READY" ? 1 : $1.status.uppercased() == "FAILED" ? 2 : 3, $1.id) }
+                    let ds = dispatchBoardOrder(model.items.filter { $0.type == "dispatches" })
                     VStack(alignment: .leading, spacing: 4) {
                         if ds.isEmpty { Text("위임 기록 없음 — 할 일 상세의 Build This 에서 생성").font(.caption).foregroundStyle(.secondary) }
                         ForEach(ds) { d in
                             HStack {
                                 Text(d.name).font(.callout)
                                 Spacer()
-                                Text(d.status.uppercased())
+                                Text(XUI.termStatus(d.status))
                                     .font(.caption2.monospaced())
                                     .padding(.horizontal, 5).padding(.vertical, 1)
                                     .foregroundStyle(dispatchStatusColor(d.status))
                                     .background(dispatchStatusColor(d.status).opacity(0.12), in: Capsule())
                                 Menu("상태 변경") {
-                                    ForEach(["WORKING", "AWAITING_INPUT", "RESULT_READY", "MERGED", "FAILED", "CANCELLED"], id: \.self) { s in
-                                        Button(s) { try? model.setDispatchStatus(id: d.id, status: s) }
+                                    let order: [(String,String)] = [("WORKING","작업 중으로 전환"),("AWAITING_INPUT","나를 기다림(질문 발생)"),("RESULT_READY","결과 확인 요청"),("MERGED","반영됨(머지)"),("FAILED","실패 — 판단 필요"),("CANCELLED","취소")]
+ ForEach(order, id: \.0) { pair in
+                                        Button(pair.1) { try? model.setDispatchStatus(id: d.id, status: pair.0) }
                                     }
                                 }
                                 .menuStyle(.borderlessButton).frame(width: 74)
@@ -381,7 +381,7 @@ struct PortfolioSummaryView: View {
                 HStack {
                     Text(c.name)
                     Spacer()
-                    Text(c.status).font(.caption2.monospaced())
+                    Text(XUI.termStatus(c.status)).font(.caption2.monospaced())
                     if let pn = model.item("products", c.product)?.name {
                         Text(pn).font(.caption2).foregroundStyle(.secondary)
                     }
@@ -446,7 +446,7 @@ struct ProductDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 header
                 Picker("", selection: $tab) {
                     Text("개요").tag(ProductTab.overview)
@@ -482,7 +482,7 @@ struct ProductDetailView: View {
     private var header: some View {
         HStack {
             Text(product.name).font(.title2.bold())
-            Text(product.status).font(.caption.monospaced())
+            Text(XUI.termStatus(product.status)).font(.caption.monospaced())
                 .padding(.horizontal, 8).padding(.vertical, 2)
                 .background(.quaternary, in: Capsule())
             if let v = model.profile(product.id)["version"] { Text(v).font(.caption).foregroundStyle(.secondary) }
@@ -507,7 +507,7 @@ struct ProductDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let nr = model.nextRelease(product.id) {
                     let rr = model.releaseReadiness(nr.id, productId: product.id)
-                    Text("\(nr.name) [\(nr.status)] — change \(rr.shipped)/\(rr.total)")
+                    Text("\(nr.name) · \(XUI.termStatus(nr.status)) — 할 일 \(rr.shipped)/\(rr.total)")
                     ForEach(rr.blockers, id: \.self) { Label($0, systemImage: "lock.fill").font(.caption).foregroundStyle(.red) }
                 } else {
                     Text("릴리즈 탭에서 계획을 만드세요").font(.caption).foregroundStyle(.secondary)
@@ -521,7 +521,7 @@ struct ProductDetailView: View {
                 let act = model.changes(for: product.id).filter { ["BUILD", "REVIEW", "SHIP_READY"].contains($0.status) }
                 if act.isEmpty { Text("지금 진행 중인 할 일 없음").font(.caption).foregroundStyle(.secondary) }
                 ForEach(act) { c in
-                    HStack { Text(c.name); Spacer(); Text(c.status).font(.caption2.monospaced()) }
+                    HStack { Text(c.name); Spacer(); Text(XUI.termStatus(c.status)).font(.caption2.monospaced()) }
                 }
             }
         }
@@ -546,6 +546,7 @@ struct ProductDetailView: View {
     // ---- Roadmap (milestone × change — Linear projects 스타일) -------------------
     @State private var newMilestoneName = ""
     @State private var newMilestoneDate = ""
+    @State private var newMilestoneDesc = ""
 
     /* 보드 — Shape Up betting + Linear stage flow 벤치마크 (research synthesis)
      * 변경 전 정책: Change 목록이 탭 산개(로드맵=IDEA/PLAN, 개발=전체) — "어디가 어디까지 됐나"를 표로 못 봄
@@ -597,7 +598,7 @@ struct ProductDetailView: View {
             HStack(alignment: .top, spacing: 10) {
                 PlanLane(
                     title: "지금 (Now)",
-                    subtitle: focus.map { $0.name + ($0.targetDate.map { " · \(String($0.prefix(10)))" } ?? "") } ?? "포커스 마일스톤 없음",
+                    subtitle: focus.map { ($0.desc.isEmpty ? $0.name : $0.desc) + ($0.targetDate.map { " · \(String($0.prefix(10)))까지" } ?? "") } ?? "마일스톤이 없으면 여기서 만드세요",
                     count: focus?.changes.count ?? 0,
                     weeks: (focus?.changes ?? []).reduce(0) { $0 + (Int(model.docFields(type: "change", id: $1.id)["appetite_weeks"] ?? "") ?? 0) },
                     overdue: focus?.isOverdue ?? false,
@@ -655,13 +656,15 @@ struct ProductDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("새 마일스톤").font(.headline)
             TextField("이름 (예: Internal alpha)", text: $newMilestoneName)
+            TextField("이 마일스톤은 무엇을 끝내면 지나는 단계인가?", text: $newMilestoneDesc)
             TextField("목표일 2026-10-01 (선택)", text: $newMilestoneDate)
             Button("추가") {
                 let n = newMilestoneName.trimmingCharacters(in: .whitespaces)
                 guard !n.isEmpty else { return }
                 try? model.createMilestone(productId: product.id, name: n,
-                                           targetDate: newMilestoneDate.isEmpty ? nil : newMilestoneDate)
-                newMilestoneName = ""; newMilestoneDate = ""; showMilestoneForm = false
+                                           targetDate: newMilestoneDate.isEmpty ? nil : newMilestoneDate,
+                                           desc: newMilestoneDesc.isEmpty ? nil : newMilestoneDesc)
+                newMilestoneName = ""; newMilestoneDate = ""; newMilestoneDesc = ""; showMilestoneForm = false
             }
             .disabled(newMilestoneName.trimmingCharacters(in: .whitespaces).isEmpty)
         }
@@ -767,12 +770,13 @@ struct ProductDetailView: View {
                                 .padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(.green.opacity(0.15), in: Capsule())
                         }
-                        Text(docPriority(c.id)).font(.caption2.monospaced())
+                        Text(docPriority(c.id)).font(.caption2)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(.blue.opacity(0.12), in: Capsule())
                         Menu("우선순위") {
-                            ForEach(["critical", "high", "normal", "low"], id: \.self) { p in
-                                Button(p) { try? model.setPriority(changeId: c.id, priority: p) }
+                            let prios: [(String,String)] = [("critical","최우선"),("high","높음"),("normal","보통"),("low","나중")]
+ ForEach(prios, id: \.0) { pair in
+                                Button(pair.1) { try? model.setPriority(changeId: c.id, priority: pair.0) }
                             }
                         }
                         .menuStyle(.borderlessButton).frame(width: 70)
@@ -788,7 +792,7 @@ struct ProductDetailView: View {
                         HStack {
                             Text(c.name).fontWeight(.medium)
                             Spacer()
-                            Text(c.status).font(.caption2.monospaced())
+                            Text(XUI.termStatus(c.status)).font(.caption2.monospaced())
                             Button("열기") {}
                                 .buttonStyle(.link)
                         }
@@ -825,7 +829,12 @@ struct ProductDetailView: View {
     }
 
     private func docPriority(_ changeId: String) -> String {
-        model.docFields(type: "change", id: changeId)["priority"] ?? "normal"
+        switch model.docFields(type: "change", id: changeId)["priority"] ?? "normal" {
+        case "critical": return "최우선"
+        case "high": return "높음"
+        case "low": return "나중"
+        default: return "보통"
+        }
     }
 
     // ---- Releases ------------------------------------------------------------
@@ -884,7 +893,7 @@ struct ProductDetailView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
                     Text(r.name).font(.headline.monospaced())
-                    Text(r.status).font(.caption.monospaced())
+                    Text(XUI.termStatus(r.status)).font(.caption.monospaced())
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(r.status == "RELEASED" ? Color.green.opacity(0.18) : .orange.opacity(0.15), in: Capsule())
                     // 절대 날짜 — 출시 카드에만 (Raycast: 버전칩 + 날짜)
@@ -893,8 +902,9 @@ struct ProductDetailView: View {
                     }
                     Spacer()
                     Menu("상태 변경") {
-                        ForEach(["PLANNED", "PREPARING", "READY", "SUBMITTED", "RELEASED", "ROLLED_BACK"], id: \.self) { st in
-                            Button(st) { try? model.setReleaseStatus(id: r.id, status: st) }
+                        let states: [(String,String)] = [("PLANNED","예정"),("PREPARING","준비 중"),("READY","제출 대기"),("SUBMITTED","제출됨"),("RELEASED","나갔음 ✓"),("ROLLED_BACK","되돌림")]
+ ForEach(states, id: \.0) { pair in
+                            Button(pair.1) { try? model.setReleaseStatus(id: r.id, status: pair.0) }
                         }
                     }
                     .frame(width: 90)
@@ -962,7 +972,7 @@ struct ProductDetailView: View {
                     TextField("무엇을 관찰/가정했나", text: $insTitle)
                     Picker("", selection: $insKind) {
                         ForEach(["OBSERVATION", "INTERVIEW", "SECONDARY", "DERIVED", "RETRO", "OPPORTUNITY", "ASSUMPTION"], id: \.self) { k in
-                            Text(k).tag(k)
+                            Text(XUI.termKind(k)).tag(k)
                         }
                     }
                     .labelsHidden().frame(width: 140)
@@ -982,10 +992,10 @@ struct ProductDetailView: View {
                 ForEach(ins) { i in
                     HStack {
                         Text(i.name).font(.callout)
-                        Text(model.docFields(type: "insight", id: i.id)["kind"] ?? "?")
+                        Text(XUI.termKind(model.docFields(type: "insight", id: i.id)["kind"] ?? "?"))
                             .font(.caption2).foregroundStyle(.secondary)
                         Spacer()
-                        Button(i.status) { try? model.cycleInsightStatus(id: i.id) }
+                        Button(XUI.termStatus(i.status)) { try? model.cycleInsightStatus(id: i.id) }
                             .buttonStyle(.borderless)
                             .foregroundStyle(i.status == "VALIDATED" ? Color.green : i.status == "OUTDATED" ? Color.secondary : Color.orange)
                             .help("탭: OPEN→VALIDATED→OUTDATED")
@@ -1210,7 +1220,7 @@ struct ProductDetailView: View {
                     HStack {
                         Text(r.name)
                         Spacer()
-                        Text(r.status).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                        Text(XUI.termStatus(r.status)).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -1379,7 +1389,7 @@ struct ChangeDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text(change.name).font(.title2.bold())
-                    Text(change.status).font(.caption.monospaced())
+                    Text(XUI.termStatus(change.status)).font(.caption.monospaced())
                         .padding(.horizontal, 8).padding(.vertical, 2)
                         .background(Color.statusFor(change.status).opacity(0.18), in: Capsule())
                     Text("product: \(change.product.isEmpty ? "—" : change.product)")
@@ -1402,11 +1412,11 @@ struct ChangeDetailView: View {
                             Button(t) { try? model.setStage(itemId: change.id, targetType: "changes", status: t) }
                         }
                         if transitions.isEmpty {
-                            Text("전이 불가 (\(change.status) 종결 상태)").foregroundStyle(.secondary)
+                            Text("이미 \(XUI.termStatus(change.status)) — 되돌릴 수는 운영 탭 문서 편집에서").foregroundStyle(.secondary)
                         }
                     }
                     .frame(width: 110)
-                    Text("현재: \(change.status)").font(.caption).foregroundStyle(.secondary)
+                    Text("지금: \(XUI.termStatus(change.status))").font(.caption).foregroundStyle(.secondary)
                 }
 
                 XCard("세부 내용") {
@@ -1568,7 +1578,7 @@ struct ChangeDetailView: View {
                                 Text(doc.fields["name"] ?? r.name).font(.headline)
                                 Spacer()
                                 Text(doc.fields["assessment"] ?? "").font(.caption2).foregroundStyle(.secondary)
-                                Text(r.status).font(.caption2.monospaced())
+                                Text(XUI.termStatus(r.status)).font(.caption2.monospaced())
                             }
                             let delivered = stringList(doc.fields["delivered"])
                             let notDelivered = stringList(doc.fields["not_delivered"])
@@ -1758,7 +1768,7 @@ struct WorkbenchDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text(item.name).font(.title2.bold())
-                    Text(item.status).font(.caption.monospaced())
+                    Text(XUI.termStatus(item.status)).font(.caption.monospaced())
                         .padding(.horizontal, 8).padding(.vertical, 2)
                         .background(.quaternary, in: Capsule())
                     Spacer()
@@ -1972,67 +1982,13 @@ struct SettingsView: View {
 
 
 /// Linear 스타일 마일스톤 행: focus(◆ 강조)·가중 진행률·target date·overdue·change 그룹핑
-struct MilestoneRow: View {
-    @EnvironmentObject private var model: AppModel
-    let ms: AppModel.MilestoneInfo
-    let all: [AppModel.Item]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                if ms.isFocus { Image(systemName: "largecircle.fill.circle").foregroundStyle(.yellow) }
-                Text(ms.name).font(.headline)
-                XUI.statusChip(ms.status)
-                if let t = ms.targetDate {
-                    Text(String(t.prefix(10))).font(.caption2.monospaced())
-                        .foregroundStyle(ms.isOverdue ? Color.red : Color.secondary)
-                    if ms.isOverdue { Text("기한 초과").font(.caption2).foregroundStyle(.red) }
-                }
-                Spacer()
-                Text("\(ms.progress)%").font(.caption.monospaced()).foregroundStyle(.secondary)
-                Menu("…") {
-                    Button("planned") { try? model.setMilestoneStatus(id: ms.milestoneId, status: "planned") }
-                    Button("active") { try? model.setMilestoneStatus(id: ms.milestoneId, status: "active") }
-                    Button("완료 처리") { try? model.setMilestoneStatus(id: ms.milestoneId, status: "done") }
-                }
-                .menuStyle(.borderlessButton).frame(width: 30)
-            }
-            ProgressView(value: Double(ms.progress), total: 100)
-                .tint(ms.isOverdue ? .red : ms.progress == 100 ? .green : .accentColor)
-            /* Shape Up 베팅: 이 마일스톤에 건 주수 합 — 사람이 보폭을 보는 유일한 숫자 */
-            let betWeeks = ms.changes.reduce(0) { $0 + (Int(model.docFields(type: "change", id: $1.id)["appetite_weeks"] ?? "") ?? 0) }
-            if betWeeks > 0 {
-                HStack(spacing: 4) {
-                    Text("베팅 \(betWeeks)w").font(.caption2.monospaced())
-                        .foregroundStyle(betWeeks > 8 ? Color.red : Color.secondary)
-                    if betWeeks > 8 { Text("과베팅 — 하나를 PAUSED로 빼거나 쪼개세요").font(.caption2).foregroundStyle(.red) }
-                }
-            }
-            if ms.changes.isEmpty {
-                Text("변경 없음 — 아래 목록에서 할당하세요").font(.caption2).foregroundStyle(.tertiary)
-            }
-            ForEach(ms.changes) { c in
-                HStack(spacing: 6) {
-                    Image(systemName: c.status == "SHIPPED" ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(c.status == "SHIPPED" ? Color.green : Color.secondary)
-                        .font(.caption)
-                    Text(c.name).font(.callout)
-                    Spacer()
-                    Text(c.status).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                    Menu("마일스톤") {
-                        Button("해제") { try? model.setMilestone(changeId: c.id, milestoneId: nil) }
-                    }
-                    .menuStyle(.borderlessButton).frame(width: 64)
-                }
-                .padding(.leading, 4)
-            }
-            Text("완료 \(ms.changes.filter { $0.status == "SHIPPED" }.count)/\(ms.changes.count) · 가중 진행률(started부터)").font(.caption2).foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 // ---- Dispatch 상태 색 / Scorecard 채점 폼 (research wave1-2 반영) --------------
+
+/// 대기 중(나를 기다림/결과 확인/실패)이 맨 위 — 사람이 볼 순서
+func dispatchBoardOrder(_ ds: [AppModel.Item]) -> [AppModel.Item] {
+    let rank: [String: Int] = ["AWAITING_INPUT": 0, "RESULT_READY": 1, "FAILED": 2]
+    return ds.sorted { (rank[$0.status.uppercased()] ?? 3, $0.id) < (rank[$1.status.uppercased()] ?? 3, $1.id) }
+}
 
 func dispatchStatusColor(_ s: String) -> Color {
     switch s.uppercased() {
@@ -2182,7 +2138,7 @@ struct BoardColumn: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Circle().fill(XUI.statusColor(stage)).frame(width: 8, height: 8)
-                Text(stage == "SHIP_READY" ? "SHIP READY" : stage).font(.caption.bold().monospaced())
+                Text(XUI.termStatus(stage)).font(.caption.bold())
                 Text("\(changes.count)").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 /* 베팅 용량: 이 열에 쌓인 주수 합 — Shape Up "같은 사이클에 다 넣으면 죽는다" */

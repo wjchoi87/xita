@@ -68,6 +68,34 @@ final class BoardSnapshotTest: XCTestCase {
         XCTAssertGreaterThan(png.count, 10_000)
     }
 
+    func testPlanLaneWithMilestoneDescSnapshot() throws {
+        let dir = NSTemporaryDirectory() + "xita-snap-" + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let model = AppModel(workspaceDir: dir)
+        try model.bootstrapDemo()
+        try model.createMilestone(productId: "novel", name: "Internal alpha", targetDate: "2026-11-15", desc: "지인이 써볼 수 있는 상태")
+        try model.createChange(productId: "novel", title: "오프라인 초안 저장", intent: "기내에서도 집필")
+        if let ch = model.items.first(where: { $0.name == "오프라인 초안 저장" }) {
+            try model.setMilestone(changeId: ch.id, milestoneId: "novel-m-internal-alpha")
+            try model.scoreChange(changeId: ch.id, pop: 7, need: 8, strat: 9, effort: 3, conf: 7)
+        }
+        let ms = model.milestones(for: "novel").filter { $0.status != "done" }
+        let lane = PlanLane(title: "지금 (Now)",
+                            subtitle: (ms.first.map { ($0.desc.isEmpty ? $0.name : $0.desc) + " · " + (($0.targetDate ?? "").isEmpty ? "" : String(($0.targetDate ?? "").prefix(10)) + "까지") }) ?? "",
+                            count: ms.first?.changes.count ?? 0, weeks: 1, overdue: false, done: Double(ms.first?.progress ?? 0)) {
+            ForEach(ms.first?.changes ?? []) { c in PlanChangeRow(change: c, milestones: ms) }
+            QuickAddChangeRow(productId: "novel", milestoneId: ms.first?.milestoneId)
+        }.frame(width: 300, height: 260).environmentObject(model)
+        let r = ImageRenderer(content: lane)
+        r.scale = 2
+        guard let img = r.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else {
+            return XCTFail("lane render failed")
+        }
+        try png.write(to: URL(fileURLWithPath: "/tmp/xita-nowlane-snapshot.png"))
+        XCTAssertGreaterThan(png.count, 8_000)
+    }
+
     func testTimelineTwoLayerRender() throws {
         let ws = "/Users/wjchoi/workspace/xita/apps/server/.xita-workspace"
         guard FileManager.default.fileExists(atPath: ws) else { throw XCTSkip("dev workspace 없음") }

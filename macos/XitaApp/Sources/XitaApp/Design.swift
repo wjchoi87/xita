@@ -45,21 +45,88 @@ enum XUI {
         case "SHIPPED": return "출시됨"
         case "PAUSED": return "잠시 멈춤"
         case "CANCELLED": return "하지 않음"
+        // 관찰/가설
         case "OPEN": return "열림"
         case "VALIDATED": return "검증됨"
         case "OUTDATED": return "지난 것"
+        // 위임(에이전트) 런 상태
+        case "DISPATCHED": return "보냄"
         case "AWAITING_INPUT": return "나를 기다림"
         case "RESULT_READY": return "결과 확인 필요"
         case "WORKING": return "작업 중"
         case "MERGED": return "반영됨"
+        case "CLOSED": return "끝남"
         case "FAILED": return "실패"
+        // 출시 (PLANNED는 아래 마일스톤과 공유)
+        case "PREPARING": return "준비 중"
+        case "READY": return "제출 대기"
+        case "SUBMITTED": return "제출됨"
+        case "RELEASED": return "나갔음"
+        case "ROLLED_BACK": return "되돌림"
+        // 메모함(워크벤치)
+        case "CAPTURED": return "담김"
+        case "PROMOTED": return "승격됨"
+        case "ARCHIVED": return "보관함"
+        case "DISCARDED": return "버림"
+        // 제안
+        case "PENDING": return "내 판단 대기"
+        case "APPROVED": return "승인함"
+        case "REJECTED": return "거절함"
+        // 마일스톤/제품 운영 상태
+        case "PLANNED": return "예정"
+        case "ACTIVE": return "진행"
+        case "DONE": return "완료"
+        case "PRODUCTION": return "운영 중"
+        case "BETA": return "베타"
+        case "DEVELOPMENT": return "개발 중"
+        case "MAINTENANCE": return "관리 모드"
+        case "RETIRED": return "은퇴"
+        case "OK": return "정상"
+        case "DRIFT": return "컨텍스트 어긋남"
+        case "OFFLINE": return "오프라인"
         default: return status
         }
     }
 
-    static let pad: CGFloat = 12
-    static let gap: CGFloat = 10
-    static let cardRadius: CGFloat = 10
+    /// kind/유형 원시값 → 사용자어 (OBSERVATION 같은 코드를 화면에 그대로 안 낸다)
+    static func termKind(_ k: String) -> String {
+        switch k.uppercased() {
+        case "OBSERVATION": return "관찰"
+        case "INTERVIEW": return "인터뷰"
+        case "FOCUS_GROUP": return "포커스 그룹"
+        case "SECONDARY": return "다른 곳에서 얻은 자료"
+        case "DERIVED": return "따져낸 것"
+        case "RETRO": return "회고"
+        case "OPPORTUNITY": return "기회"
+        case "ASSUMPTION": return "가정"
+        case "DIRECTION": return "방향"
+        case "SCOPE": return "범위"
+        case "ARCHITECTURE": return "구조"
+        case "UX": return "경험"
+        case "DECISION": return "결정"
+        case "REVIEW": return "리뷰"
+        case "RELEASE": return "출시"
+        case "CONTEXT_DRIFT": return "컨텍스트가 어긋남"
+        case "ARTIFACT_CONFLICT": return "문서 충돌"
+        case "SHIP_BLOCKER": return "출시 차단"
+        case "SYNC_CONFLICT": return "동기화 충돌"
+        case "AGENT_WAITING": return "에이전트 대기"
+        case "GITHUB": return "깃허브"
+        case "FIGMA": return "피그마"
+        case "LINEAR": return "리니어"
+        case "GENERIC": return "일반"
+        case "PAGE": return "페이지"
+        case "LINK": return "링크"
+        case "ASSET": return "자산"
+        case "MOBILE_SAAS": return "모바일 서비스"
+        case "WEB_SAAS": return "웹 서비스"
+        default: return k
+        }
+    }
+
+    static let pad: CGFloat = 16
+    static let gap: CGFloat = 12
+    static let cardRadius: CGFloat = 12
     static let chipRadius: CGFloat = 6
 
     static func card<Content: View>(_ content: () -> Content) -> some View {
@@ -90,8 +157,8 @@ enum XUI {
     }
 
     static func statusChip(_ status: String) -> some View {
-        Text(status)
-            .font(.caption2.monospaced())
+        Text(XUI.termStatus(status))
+            .font(.caption2)
             .padding(.horizontal, 7).padding(.vertical, 2)
             .foregroundStyle(statusColor(status))
             .background(statusColor(status).opacity(0.14), in: Capsule())

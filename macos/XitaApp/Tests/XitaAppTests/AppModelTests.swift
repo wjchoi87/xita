@@ -392,6 +392,34 @@ final class AppModelTests: XCTestCase {
         XCTAssertNotEqual(after.status, "SHIPPED")
     }
 
+    // ---- 용어 계층 QA (2026-08-30 감사: "옵션 값이 원시값으로 노출") ----
+
+    func testTerminologyCoversAllUserVisibleEnums() {
+        // 화면에 나갈 수 있는 원시 enum 전수 — termStatus/termKind가 같은 값을 반환하면 노출 사고
+        let statusSamples = ["IDEA","PLAN","BUILD","REVIEW","SHIP_READY","SHIPPED","PAUSED","CANCELLED",
+                             "DISPATCHED","WORKING","AWAITING_INPUT","RESULT_READY","MERGED","FAILED",
+                             "PLANNED","PREPARING","READY","SUBMITTED","RELEASED","ROLLED_BACK",
+                             "CAPTURED","PROMOTED","ARCHIVED","PENDING","APPROVED","REJECTED",
+                             "OPEN","VALIDATED","OUTDATED","PRODUCTION","BETA","ACTIVE","DONE"]
+        for s2 in statusSamples {
+            XCTAssertNotEqual(XUI.termStatus(s2), s2, "termStatus 미覆盖: \(s2)")
+        }
+        let kindSamples = ["OBSERVATION","INTERVIEW","SECONDARY","DERIVED","RETRO","OPPORTUNITY","ASSUMPTION",
+                           "DIRECTION","SHIP_BLOCKER","AGENT_WAITING","SYNC_CONFLICT","CONTEXT_DRIFT"]
+        for k in kindSamples {
+            XCTAssertNotEqual(XUI.termKind(k), k, "termKind 미覆盖: \(k)")
+        }
+    }
+
+    func testMilestoneDescShownInPlanLane() throws {
+        let model = AppModel(workspaceDir: dir)
+        try model.bootstrapDemo()
+        try model.createMilestone(productId: "novel", name: "베타 게이트", targetDate: "2026-12-01", desc: "첫 외부 사용자에게 열기")
+        let m = model.milestones(for: "novel").first(where: { $0.name == "베타 게이트" })
+        XCTAssertNotNil(m)
+        XCTAssertEqual(m?.desc, "첫 외부 사용자에게 열기", "마일스톤의 정체가 설명으로 담겨야 한다")
+    }
+
     // ---- Research wave1/2 반영: insight / scorecard / dispatch 런 루프 ----
 
     func testInsightCreateAndCycle() throws {

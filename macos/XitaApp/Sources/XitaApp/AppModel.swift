@@ -258,6 +258,8 @@ public final class AppModel: ObservableObject {
         public let name: String
         public let status: String
         public let targetDate: String?
+        /// 마일스톤의 정체 — '무엇을 끝내면 여길 지나는가' 한 줄. 숫자만 보이는 불만 직시(2026-08-30)
+        public let desc: String
         public var changes: [Item]
         public var progress: Int
         public var isOverdue: Bool
@@ -290,6 +292,7 @@ public final class AppModel: ObservableObject {
             let target = d["target_date"]
             let overdue = (target.flatMap { Self.parseDateLoose(String($0)) }.map { $0 < Date() }) ?? false
             infos.append(MilestoneInfo(milestoneId: m.id, name: m.name, status: m.status, targetDate: target,
+                                       desc: d["description"] ?? "",
                                        changes: linked, progress: progress,
                                        isOverdue: overdue && m.status != "done",
                                        isFocus: false))
@@ -304,9 +307,10 @@ public final class AppModel: ObservableObject {
         docFields(type: "milestone", id: milestoneId)["target_date"] ?? "9999"
     }
 
-    public func createMilestone(productId: String, name: String, targetDate: String?) throws {
+    public func createMilestone(productId: String, name: String, targetDate: String?, desc: String? = nil) throws {
         var fields: [KV] = [KV("product", productId), KV("name", name), KV("status", "planned")]
         if let targetDate { fields.append(KV("target_date", targetDate)) }
+        if let desc, !desc.isEmpty { fields.append(KV("description", desc)) }
         _ = try applyMulti(target: "milestone", targetId: "\(productId)-m-\(slug(name))", baseRevision: 0, kind: "create", fields: fields)
     }
 
