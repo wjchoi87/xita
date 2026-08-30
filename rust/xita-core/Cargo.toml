@@ -1,0 +1,20 @@
+[package]
+name = "xita-core"
+version = "0.1.0"
+edition = "2021"
+description = "XITA shared core (v0.5) — Markdown/YAML canonical storage, revision, operations, conflict, sync semantics owned by Rust"
+license = "UNLICENSED"
+
+[lib]
+name = "xita_core"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+# v0.5 의존은 의도적으로 최소화 (serde 등은 확정 요구 이후 추가).
+[dependencies]
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 2

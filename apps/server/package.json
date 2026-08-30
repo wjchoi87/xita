@@ -1,0 +1,70 @@
+{
+  "name": "@xita/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node bin/server.js",
+    "build": "node ace build",
+    "dev": "node ace serve --hmr",
+    "test": "node ace test",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "imports": {
+    "#controllers/*": "./app/controllers/*.js",
+    "#exceptions/*": "./app/exceptions/*.js",
+    "#middleware/*": "./app/middleware/*.js",
+    "#utils/*": "./app/utils/*.js",
+    "#v4/*": "./app/v4/*.js",
+    "#providers/*": "./providers/*.js",
+    "#start/*": "./start/*.js",
+    "#tests/*": "./tests/*.js",
+    "#config/*": "./config/*.js"
+  },
+  "devDependencies": {
+    "@adonisjs/assembler": "^7.8.2",
+    "@adonisjs/eslint-config": "^2.0.0-beta.6",
+    "@adonisjs/prettier-config": "^1.4.0",
+    "@adonisjs/tsconfig": "^1.4.0",
+    "@japa/api-client": "^2.0.3",
+    "@japa/assert": "^3.0.0",
+    "@japa/plugin-adonisjs": "^3.0.1",
+    "@japa/runner": "^3.1.4",
+    "@swc/core": "1.7.26",
+    "@types/node": "^22.7.5",
+    "eslint": "^9.12.0",
+    "hot-hook": "^0.3.1",
+    "pino-pretty": "^11.2.2",
+    "prettier": "^3.3.3",
+    "ts-node-maintained": "^10.9.4",
+    "typescript": "~5.6"
+  },
+  "dependencies": {
+    "@adonisjs/core": "^6.14.1",
+    "@adonisjs/cors": "^2.2.1",
+    "@vinejs/vine": "^2.1.0",
+    "reflect-metadata": "^0.2.2",
+    "yaml": "^2.5.1"
+  },
+  "hotHook": {
+    "boundaries": [
+      "./app/controllers/**/*.ts",
+      "./app/middleware/*.ts"
+    ]
+  },
+  "overrides": {
+    "strtok3": "8.0.1"
+  },
+  "resolutions": {
+    "strtok3": "8.0.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "strtok3": "8.0.1"
+    }
+  },
+  "prettier": "@adonisjs/prettier-config"
+}

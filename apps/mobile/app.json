@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "XITA",
+    "slug": "xita-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "xita",
+    "userInterfaceStyle": "automatic",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "local.xita.mobile" },
+    "android": { "package": "local.xita.mobile" },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "experiments": { "typedRoutes": true }
+  }
+}

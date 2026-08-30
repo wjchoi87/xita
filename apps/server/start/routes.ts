@@ -1,0 +1,126 @@
+/*
+|--------------------------------------------------------------------------
+| Routes file — XITA host API (v0.4 REV-001: canonical Markdown workspace)
+|--------------------------------------------------------------------------
+|
+| PostgreSQL legacy surface(v0.3 Phase 1-7 REST)는 v0.4 §17에 따라 제거됨.
+| 이 서버는 macOS/PC 호스트의 canonical Markdown workspace 위에
+| v4 도메인 REST + Mobile sync transport + SSE realtime 을 제공한다.
+|
+*/
+
+import router from '@adonisjs/core/services/router'
+
+const V4 = () => import('#controllers/v4_controller')
+const Sync = () => import('#controllers/sync_controller')
+const Realtime = () => import('#controllers/realtime_controller')
+const Ops = () => import('#controllers/v4_ops_controller')
+
+router.get('/', async () => {
+  return { service: 'xita', protocol: 'v4', status: 'ok' }
+})
+
+router
+  .group(() => {
+    // Realtime SSE (SPEC §8)
+    router.get('realtime/events', [Realtime, 'events'])
+
+    // v0.4 Canonical Domain REST (primary, Markdown+YAML)
+    router.get('v4/status', [V4, 'status'])
+    router.get('v4/products', [V4, 'products'])
+    router.post('v4/products', [V4, 'createProduct'])
+    router.get('v4/products/:id', [V4, 'getProduct'])
+    router.get('v4/products/:id/state', [V4, 'productState'])
+    router.post('v4/products/:id/changes', [V4, 'createChange'])
+    router.post('v4/changes/:id/transition', [V4, 'transitionChange'])
+    router.get('v4/workbench', [V4, 'workbenchList'])
+    router.post('v4/workbench', [V4, 'createWorkbench'])
+    router.post('v4/workbench/:id/promote', [V4, 'promoteWorkbench'])
+    router.get('v4/needs-you', [Ops, 'needsYou'])
+    router.get('v4/closest-to-ship', [Ops, 'closest'])
+    router.get('v4/timeline', [Ops, 'timeline'])
+    router.get('v4/search', [Ops, 'search'])
+    router.get('v4/proposals', [Ops, 'listProposals'])
+    router.post('v4/proposals/:id/resolve', [Ops, 'resolveProposal'])
+    router.get('v4/reviews', [Ops, 'listReviews'])
+    router.get('v4/dispatches', [Ops, 'listDispatches'])
+    router.get('v4/dispatches/:id/context-update', [Ops, 'contextUpdate'])
+    router.get('v4/capabilities', [Ops, 'listCapabilities'])
+    router.get('v4/workbench-board', [Ops, 'workbenchBoard'])
+    router.post('v4/workbench/:id/status', [Ops, 'workbenchStatus'])
+    router.post('v4/artifacts/:id/review-status', [Ops, 'artifactReviewStatus'])
+    router.post('v4/analyze-impact', [Ops, 'analyzeImpact'])
+    router.get('v4/summarize', [Ops, 'summarize'])
+    router.get('v4/ask', [Ops, 'ask'])
+    router.post('v4/artifacts/:id/patch-suggest', [Ops, 'suggestPatch'])
+    router.get('v4/patches', [Ops, 'listPatches'])
+    router.post('v4/patches/:id/apply', [Ops, 'applyPatch'])
+    router.post('v4/patches/:id/dismiss', [Ops, 'dismissPatch'])
+    router.post('v4/changes/:id/proposals', [Ops, 'createProposal'])
+    router.post('v4/changes/:id/capabilities', [Ops, 'attachCapabilityToChange'])
+    router.post('v4/changes/:id/agent-result', [Ops, 'agentResult'])
+    router.post('v4/changes/:id/approve', [Ops, 'approve'])
+    router.post('v4/changes/:id/request-changes', [Ops, 'requestChanges'])
+    router.get('v4/products/:id/capabilities', [Ops, 'listCapabilities'])
+    router.post('v4/products/:id/capabilities', [Ops, 'addCapability'])
+    router.get('v4/products/:id/readiness', [Ops, 'getReadiness'])
+    router.post('v4/products/:id/readiness/template', [Ops, 'applyTemplate'])
+    router.post('v4/products/:id/readiness/patch', [Ops, 'patchReadiness'])
+    router.get('v4/products/:id/references', [Ops, 'listReferences'])
+    router.post('v4/products/:id/references', [Ops, 'addReference'])
+    router.post('v4/products/:id/observe/github', [Ops, 'observeGithub'])
+    router.post('v4/products/:id/observe/linear', [Ops, 'observeLinear'])
+    router.post('v4/products/:id/observe/figma', [Ops, 'observeFigma'])
+    router.get('v4/decisions', [Ops, 'listDecisions'])
+    router.post('v4/products/:id/decisions', [Ops, 'addDecision'])
+    router.post('v4/decisions/:id/supersede', [Ops, 'supersedeDecision'])
+    router.post('v4/products/:id/dispatch', [Ops, 'buildThis'])
+    router.get('v4/products/:id/biography', [Ops, 'biography'])
+    router.get('v4/products/:id/since', [Ops, 'sinceVisit'])
+    router.get('v4/docs/:type', [Ops, 'docsOfType'])
+    router.post('v4/products/:id/releases', [Ops, 'createRelease'])
+    router.get('v4/releases', [Ops, 'listReleases'])
+    router.post('v4/releases/:id/status', [Ops, 'releaseStatus'])
+    router.post('v4/releases/:id/changes', [Ops, 'releaseAddChange'])
+    router.get('v4/releases/:id/readiness', [Ops, 'releaseReadiness'])
+    router.get('v4/products/:id/roadmap', [Ops, 'roadmap'])
+    router.post('v4/changes/:id/priority', [Ops, 'setRoadmapPriority'])
+    router.get('v4/products/:id/health', [Ops, 'health'])
+    router.post('v4/products/:id/milestones', [Ops, 'createMilestone'])
+    router.get('v4/milestones', [Ops, 'listMilestones'])
+    router.post('v4/changes/:id/milestone', [Ops, 'assignMilestone'])
+    router.get('v4/milestones/:id/progress', [Ops, 'milestoneProgress'])
+    router.post('v4/milestones/:id/status', [Ops, 'milestoneStatus'])
+    // Insight(관찰/가설 1급 객체) + dispatch 런 루프
+    router.get('v4/insights', [Ops, 'listInsights'])
+    router.post('v4/insights', [Ops, 'createInsight'])
+    router.post('v4/insights/:id/status', [Ops, 'insightStatus'])
+    router.post('v4/dispatches/:id/update', [Ops, 'updateDispatch'])
+    // Scorecard 채점 — Aha 공식 (P+N+S-E)×C, 파생 점수는 roadmap()에서 계산
+    router.post('v4/changes/:id/score', [Ops, 'roadmapScore'])
+    router.get('v4/ai/status', [V4, 'aiStatus'])
+    router.get('v4/products/:product/handoff/:change', [Ops, 'handoff'])
+    router.get('v4/context/drift', [V4, 'contextDrift'])
+    router.post('v4/context/:artifact/dispatch', [V4, 'markDispatch'])
+
+    // v0.4 Canonical Living Artifact / Decision / Release
+    router.post('v4/artifacts', [Sync, 'createArtifact'])
+    router.get('v4/artifacts', [Ops, 'docsOfTypeArtifact'])
+    router.get('v4/artifacts/:id', [Sync, 'getArtifact'])
+    router.post('v4/artifacts/:id/revisions', [Sync, 'addArtifactRevision'])
+    router.post('v4/decisions', [Sync, 'addDecision'])
+    router.post('v4/releases', [Sync, 'addRelease'])
+
+    // v0.4 Sync Transport (Mac/PC canonical host; authenticated local port, §13-§14)
+    router.post('devices/pair', [Sync, 'pair'])
+    router.post('sync/pair', [Sync, 'confirmPair'])
+    router.get('sync/pull', [Sync, 'pull'])
+    router.post('sync/push', [Sync, 'push'])
+    router.get('sync/status', [Sync, 'status'])
+    router.get('sync/conflicts', [Sync, 'conflicts'])
+    router.post('sync/conflicts/clear', [Sync, 'clearConflict'])
+    router.post('sync/defer', [Sync, 'defer'])
+    router.get('sync/pending', [Sync, 'pending'])
+    router.post('sync/reconcile', [Sync, 'reconcile'])
+  })
+  .prefix('/api/v1')

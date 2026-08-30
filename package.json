@@ -8,7 +8,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "compose:up": "docker compose up -d",
-    "compose:down": "docker compose down"
+    "dev:server": "pnpm --filter @xita/server dev",
+    "v4:init": "pnpm --filter @xita/server node ace v4:init",
+    "mobile:start": "pnpm --filter xita-mobile start",
+    "xita": "node apps/cli/xita.mjs",
+    "rust:test": "cargo test --manifest-path rust/xita-core/Cargo.toml",
+    "test:all": "pnpm --filter @xita/server test 2>/dev/null; cargo test --manifest-path rust/xita-core/Cargo.toml"
   }
 }

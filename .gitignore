@@ -24,3 +24,15 @@ logs/
 # Xcode
 macos/**/xcuserdata/
 macos/**/DerivedData/
+
+# v0.4 canonical Markdown workspace (host-owned data)
+apps/server/.xita-workspace/
+.xita-workspace/
+
+# Rust
+rust/**/target/
+Cargo.lock
+
+# SwiftPM
+macos/**/.build/
+macos/**/.swiftpm/
