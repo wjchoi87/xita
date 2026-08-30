@@ -75,7 +75,7 @@ struct ContentView: View {
                         .tag(AppModel.Selection.change(c.targetId))
                 }
                 ForEach(model.pendingProposals) { pr in
-                    Label("Proposal: \(pr.name)", systemImage: "arrow.triangle.turn.up.right.diamond")
+                    Label("제안: \(pr.name)", systemImage: "arrow.triangle.turn.up.right.diamond")
                         .foregroundStyle(.purple)
                         .tag(AppModel.Selection.change(pr.id.hasSuffix("-") ? String(pr.id.dropLast()) : pr.id))
                 }
@@ -98,7 +98,7 @@ struct ContentView: View {
                     .tag(AppModel.Selection.product(p.id))
                 }
                 HStack {
-                    TextField("+ 새 Product", text: $newProductName)
+                    TextField("+ 새 제품", text: $newProductName)
                         .textFieldStyle(.plain)
                         .onSubmit { showNewProduct = true }
                     Button("만들기") { showNewProduct = true }
@@ -119,8 +119,8 @@ struct ContentView: View {
                     .tag(AppModel.Selection.change(c.id))
                 }
             }
-            Section("Agents") {
-                Label("Handoffs · Dispatches · Drift", systemImage: "cpu")
+            Section("에이전트") {
+                Label("에이전트 위임 · 어긋남 감시", systemImage: "cpu")
                     .tag(AppModel.Selection.agents)
                 HStack {
                     Text("감지된 Agent: \(model.availableAgents().joined(separator: ", ").isEmpty ? "없음" : model.availableAgents().joined(separator: ", "))")
@@ -191,8 +191,8 @@ struct AgentsDashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Agents").font(.title2.bold())
-                XCard("Local Execution — 감지된 코딩 Agent (§16 opt-in)") {
+                Text("에이전트").font(.title2.bold())
+                XCard("이 Mac에서 쓸 수 있는 코딩 에이전트") {
                     let agents = model.availableAgents()
                     HStack(spacing: 8) {
                         if agents.isEmpty {
@@ -205,7 +205,7 @@ struct AgentsDashboardView: View {
                         }
                     }
                 }
-                XCard("Context Drift (§45/§46)") {
+                XCard("컨텍스트 어긋남 — Agent 손에 오래된 문서") {
                     let rows = model.drifts()
                     VStack(alignment: .leading, spacing: 4) {
                         if rows.isEmpty {
@@ -227,7 +227,7 @@ struct AgentsDashboardView: View {
                 /* Dispatch 런 보드 — Vibe Kanban(Running/Idle/Needs Attention)+Conductor checks 벤치마크.
                  * 에이전트 상태는 사람이 이 메뉴로 갱신하거나 CLI `xita agent-update`로 보낸다.
                  * AWAITING_INPUT/RESULT_READY/FAILED 는 Home Needs You 로 자동 승격된다(서버와 동일 규칙). */
-                XCard("Dispatches — 런 보드 (§40/§67)") {
+                XCard("위임 보드 — 에이전트에 넘긴 일") {
                     let ds = dispatchBoardOrder(model.items.filter { $0.type == "dispatches" })
                     VStack(alignment: .leading, spacing: 4) {
                         if ds.isEmpty { Text("위임 기록 없음 — 할 일 상세의 Build This 에서 생성").font(.caption).foregroundStyle(.secondary) }
@@ -251,7 +251,7 @@ struct AgentsDashboardView: View {
                         }
                     }
                 }
-                XCard("Handoff 산출물 (workspace .xita/handoffs)") {
+                XCard("에이전트에게 보낸 문서들") {
                     let files = model.handoffFiles()
                     VStack(alignment: .leading, spacing: 3) {
                         if files.isEmpty { Text("없음").font(.caption).foregroundStyle(.secondary) }
@@ -260,7 +260,7 @@ struct AgentsDashboardView: View {
                         }
                     }
                 }
-                XCard("Activity (events.jsonl §16)") {
+                XCard("제품 활동 기록") {
                     VStack(alignment: .leading, spacing: 3) {
                         let evs = model.eventLog(limit: 12)
                         if evs.isEmpty { Text("이벤트 없음").font(.caption).foregroundStyle(.secondary) }
@@ -301,7 +301,7 @@ struct PortfolioSummaryView: View {
                     stat("\(model.workspaceRevision)", "Workspace Rev")
                 }
                 Divider()
-                Text("Quick Capture — Workbench 로 쌓입니다").font(.headline)
+                Text("메모 남기기 — 먼저 담고 나중에 옮깁니다").font(.headline)
                 TextField("제목", text: $captureTitle)
                     .textFieldStyle(.roundedBorder)
                 TextEditor(text: $captureBody)
@@ -341,7 +341,7 @@ struct PortfolioSummaryView: View {
     @State private var askAnswer: AppModel.AskResult?
 
     private var askCard: some View {
-        XCard("물어보세요 — 왜? 막힌 건? 버전? (Ask §18)") {
+        XCard("물어보세요 — 왜? 막힌 건? 지금 몇 개?") {
             VStack(alignment: .leading, spacing: 6) {
                 TextField("예: 왜 Paddle을 사용하나 / 추천 관련 변경 / 현재 버전", text: $askQuery)
                     .textFieldStyle(.roundedBorder)
@@ -640,9 +640,11 @@ struct ProductDetailView: View {
                 ) {
                     ForEach(un) { c in PlanChangeRow(change: c, milestones: ms) }
                     if ms.isEmpty {
-                        Menu("+ 마일스톤 만들기") {
-                            Button("열기") { showMilestoneForm = true }
-                        }.menuStyle(.borderlessButton).fixedSize().popover(isPresented: $showMilestoneForm) { milestoneForm }
+                        Button("+ 첫 마일스톤 만들기") { showMilestoneForm = true }
+                            .controlSize(.small)
+                            .popover(isPresented: $showMilestoneForm) { milestoneForm }
+                        Text("마일스톤은 \"이걸 끝내면 여기 지나갑니다\"라는 약속입니다")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -684,13 +686,17 @@ struct ProductDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("운영 상태").frame(width: 120, alignment: .leading).font(.caption).foregroundStyle(.secondary)
+                    // 운영 상태: 값은 정본(영문) 유지, 라벨만 사용자어 — label≠schema
                     Picker("", selection: $prodStatus) {
-                        ForEach(AppModel.ProductionStatus.allCases, id: \.rawValue) { Text($0.rawValue).tag($0.rawValue) }
+                        Text("운영 중").tag("PRODUCTION")
+                        Text("베타").tag("BETA")
+                        Text("개발 중").tag("DEVELOPMENT")
+                        Text("관리 모드").tag("MAINTENANCE")
                     }.labelsHidden().frame(width: 160)
                 }
-                fieldRow("플랫폼 (; 구분)", $platforms, "iOS;Android;Web;API")
+                fieldRow("플랫폼", $platforms, "iOS · Android · 웹 · API — 세미콜론으로 나열")
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("배포처 — 한 줄에 `env|target|url`").font(.caption).foregroundStyle(.secondary)
+                    Text("배포처 — 한 줄에 환경·대상·주소").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $deployments).font(.body.monospaced()).frame(minHeight: 70)
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(.separator))
                 }
@@ -727,7 +733,7 @@ struct ProductDetailView: View {
     }
 
     private var currentVersionCard: some View {
-        XCard("현재 배포 현황 (§10 Observed)") {
+        XCard("현재 배포 현황 (실측)") {
             VStack(alignment: .leading, spacing: 3) {
                 let p = model.profile(product.id)
                 Text("Production 버전: \(p["version"] ?? "-")")
@@ -737,7 +743,7 @@ struct ProductDetailView: View {
                     Text("  · \(line)").font(.caption.monospaced())
                 }
                 if deps.isEmpty { Text("배포처 미기록").font(.caption).foregroundStyle(.secondary) }
-                Text("플랫폼: \(p["platforms"] ?? "-") · 저장소: \(p["repo"] ?? "-")")
+                Text("플랫폼: \(p["platforms"] ?? "-") · 코드 저장소: \(p["repo"] ?? "-")")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -909,7 +915,11 @@ struct ProductDetailView: View {
                     }
                     .frame(width: 90)
                 }
-                Text("change \(rr.shipped)/\(rr.total) 완료 \(rr.ready ? "· 출시 가능 ✓" : "· 준비 대기")")
+                // 정체: 메모가 이 릴리스의 한 줄 설명이다
+                if let note = model.docFields(type: "release", id: r.id)["notes"], !note.isEmpty {
+                    Text(String(note.prefix(60))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Text("할 일 \(rr.shipped)/\(rr.total) 완료 \(rr.ready ? "· 출시 가능 ✓" : "· 준비 대기")")
                     .font(.caption)
                     .foregroundStyle(rr.ready ? .green : .secondary)
                 ForEach(rr.blockers, id: \.self) { b in
@@ -994,6 +1004,9 @@ struct ProductDetailView: View {
                         Text(i.name).font(.callout)
                         Text(XUI.termKind(model.docFields(type: "insight", id: i.id)["kind"] ?? "?"))
                             .font(.caption2).foregroundStyle(.secondary)
+                        if let body = model.doc(type: "insight", id: i.id)?.body.split(separator: "\n").first(where: { !$0.hasPrefix("#") }), !body.isEmpty {
+                            Text(String(body.prefix(30))).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                        }
                         Spacer()
                         Button(XUI.termStatus(i.status)) { try? model.cycleInsightStatus(id: i.id) }
                             .buttonStyle(.borderless)
@@ -1447,7 +1460,7 @@ struct ChangeDetailView: View {
                 XCard("Agent Handoff") {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Button("Handoff 생성") { generate() }
+                            Button("위임 문서 만들기") { generate() }
                             Button("클립보드 복사") {
                                 let pb = NSPasteboard.general
                                 pb.clearContents()
@@ -1455,7 +1468,7 @@ struct ChangeDetailView: View {
                             }.disabled(handoffMarkdown.isEmpty)
                             Spacer()
                             if !agents.isEmpty {
-                                Text("Agents:").font(.caption)
+                                Text("에이전트:").font(.caption)
                                 ForEach(agents, id: \.self) { a in
                                     Text(a).font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(.blue.opacity(0.12), in: Capsule())
@@ -1596,7 +1609,7 @@ struct ChangeDetailView: View {
                             }
                             if r.status == "ready_for_review" {
                                 HStack {
-                                    Button("승인 (Apply to State §51)") { try? model.approveChange(id: change.id) }
+                                    Button("승인하고 기능에 반영") { try? model.approveChange(id: change.id) }
                                         .buttonStyle(.borderedProminent).controlSize(.small)
                                     Button("재작업 요청") { try? model.requestChangesOn(id: change.id) }
                                         .controlSize(.small)
@@ -1612,7 +1625,7 @@ struct ChangeDetailView: View {
     }
 
     private var buildThisCard: some View {
-        XCard("Build This — Dispatch (Human Trigger)") {
+        XCard("이거 만들어주기 — 에이전트에 위임") {
             VStack(spacing: 6) {
                 HStack {
                     Text("Destination").font(.caption).foregroundStyle(.secondary).frame(width: 100, alignment: .leading)
@@ -1645,8 +1658,8 @@ struct ChangeDetailView: View {
                     TextField("Agent 에게 줄 지시", text: $instruction).textFieldStyle(.roundedBorder)
                 }
                 HStack {
-                    Button("Send Files") { dispatch(start: false) }
-                    Button("Send & Start Agent") { dispatch(start: true) }
+                    Button("문서만 전달") { dispatch(start: false) }
+                    Button("전달 + 에이전트 시작") { dispatch(start: true) }
                         .buttonStyle(.borderedProminent)
                     if let f = dispatchedFile {
                         Text("→ \(f)").font(.caption2.monospaced()).foregroundStyle(.green).lineLimit(1)
@@ -1665,7 +1678,7 @@ struct ChangeDetailView: View {
             dispatchedFile = file
             model.lastError = nil
         } catch {
-            model.lastError = "dispatch 실패: \(error)"
+            model.lastError = "위임 실패: \(error) — 경로와 쓰기 권한을 확인하세요"
         }
     }
 
@@ -1880,7 +1893,7 @@ struct SettingsView: View {
                     }
                 }
 
-                XCard("Ship Templates (§20)") {
+                XCard("출시 기준 템플릿") {
                     VStack(alignment: .leading, spacing: 6) {
                         Picker("", selection: $tplType) {
                             Text("MOBILE_SAAS").tag("MOBILE_SAAS")
@@ -1912,7 +1925,7 @@ struct SettingsView: View {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
                             }
                             if saved { Text("저장됨").foregroundStyle(.green).font(.caption) }
-                            Text("Launch 는 opt-in — Send & Start 에서만 실행됩니다 (§16/§22)")
+                            Text("실행은 명시한 때만 — 보내기만 하면 에이전트는 시작하지 않습니다")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
@@ -2185,6 +2198,9 @@ struct BoardCard: View {
                         .padding(.horizontal, 4).padding(.vertical, 1)
                         .background(.green.opacity(0.15), in: Capsule())
                 }
+                if let why = fields["intent"], !why.isEmpty {
+                    Text(String(why.prefix(22))).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
                 if let app = fields["appetite"], !app.isEmpty {
                     Text(app.lowercased() + (fields["appetite_weeks"].map { "/\($0)w" } ?? ""))
                         .font(.caption2).foregroundStyle(.secondary)
@@ -2297,7 +2313,10 @@ struct PlanChangeRow: View {
                     if let score = model.valueScore(change.id) {
                         Text(String(format: "%.1f", score)).font(.caption2.monospaced()).foregroundStyle(.green)
                     }
-                    if let app = fields["appetite"], !app.isEmpty {
+                    if let why = fields["intent"], !why.isEmpty {
+                    Text(String(why.prefix(22))).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+                if let app = fields["appetite"], !app.isEmpty {
                         Text(app.lowercased() + (fields["appetite_weeks"].map { "/\($0)w" } ?? ""))
                             .font(.caption2).foregroundStyle(.tertiary)
                     }

@@ -420,6 +420,28 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(m?.desc, "첫 외부 사용자에게 열기", "마일스톤의 정체가 설명으로 담겨야 한다")
     }
 
+    func testUserVisibleStringsHaveNoDevJargon() throws {
+        // 제도화(2026-08-30 오너 감사): 화면 라벨에 사양번호 § 와 파일경로 .xita 노출 금지(주석은 허용)
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/XitaApp/ContentView.swift").path
+        let src = try String(contentsOfFile: path, encoding: .utf8)
+        let markers = ["XCard(", "Text(", "Label(", "Section("]
+        var checked = 0
+        for raw in src.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("//") || line.hasPrefix("*") { continue }
+            guard markers.contains(where: { line.hasPrefix($0) || line.contains(" " + $0) }),
+                  let open = line.range(of: "(" + String.fromCharCode(34)),
+                  let close = line.range(of: String.fromCharCode(34) + ")", range: open.upperBound..<line.endIndex)
+            else { continue }
+            let label = String(line[open.upperBound..<close.lowerBound])
+            checked += 1
+            XCTAssertFalse(label.contains("§"), "라벨에 사양번호: \(line.prefix(80))")
+            XCTAssertFalse(label.contains(".xita"), "라벨에 파일경로: \(line.prefix(80))")
+        }
+        XCTAssertGreaterThan(checked, 30, "스캔 대상 이상함 \(checked)")
+    }
+
     // ---- Research wave1/2 반영: insight / scorecard / dispatch 런 루프 ----
 
     func testInsightCreateAndCycle() throws {
@@ -474,4 +496,8 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.waitingDispatches.count, 1)
         XCTAssertEqual(model.needsYouCount, before + 1)
     }
+}
+
+extension String {
+    static func fromCharCode(_ c: UInt8) -> String { String(UnicodeScalar(c)) }
 }

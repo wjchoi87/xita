@@ -117,7 +117,7 @@ public final class AppModel: ObservableObject {
         if let status = out["status"] as? String, status == "REJECTED" {
             lastError = "거부됨: \(out["message"] as? String ?? "")"
         } else if let status = out["status"] as? String, status == "CONFLICT" {
-            lastError = "conflict on \(targetId) — Needs You 에서 확인"
+            lastError = "\(targetId) 의 수정이 정본과 어긋났습니다 — 기록했고 '내가 결정할 일'에 올렸습니다"
         } else {
             lastError = nil
         }
