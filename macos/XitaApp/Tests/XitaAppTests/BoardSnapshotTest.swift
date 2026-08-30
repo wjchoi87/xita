@@ -96,6 +96,34 @@ final class BoardSnapshotTest: XCTestCase {
         XCTAssertGreaterThan(png.count, 8_000)
     }
 
+    func testUserHomeWorkspaceRender() throws {
+        let ws = NSHomeDirectory() + "/.xita-workspace"
+        guard FileManager.default.fileExists(atPath: ws) else { throw XCTSkip("no user ws") }
+        let model = AppModel(workspaceDir: ws)
+        try model.refresh()
+        let prods = model.products
+        guard let p0 = prods.first else { return }
+        let ms = model.milestones(for: p0.id)
+        let view = VStack(alignment: .leading, spacing: 12) {
+            Text(p0.name).font(.title2.bold())
+            Text("\(model.changes(for: p0.id).count)개의 할 일").font(.caption)
+            ForEach(ms) { m in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(m.name).font(.headline)
+                    Text("진행률 \(m.progress)% · 초점 \(m.isFocus ? "예" : "아니오") · 상태 \(XUI.termStatus(m.status))")
+                        .font(.caption)
+                }.padding().background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }.padding().frame(width: 520, height: 400, alignment: .topLeading).environmentObject(model)
+        let r = ImageRenderer(content: view)
+        r.scale = 2
+        guard let img = r.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else {
+            return XCTFail("user-ws render failed")
+        }
+        try png.write(to: URL(fileURLWithPath: "/tmp/xita-userws-snapshot.png"))
+    }
+
     func testTimelineTwoLayerRender() throws {
         let ws = "/Users/wjchoi/workspace/xita/apps/server/.xita-workspace"
         guard FileManager.default.fileExists(atPath: ws) else { throw XCTSkip("dev workspace 없음") }

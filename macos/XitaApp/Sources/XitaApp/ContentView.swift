@@ -58,7 +58,7 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $selection) {
-            Section("Needs You (\(model.needsYouCount))") {
+            Section("내가 결정할 일 (\(model.needsYouCount))") {
                 if model.conflicts.isEmpty && reviewChanges.isEmpty && model.waitingDispatches.isEmpty {
                     Label("없음 — 괜찮습니다", systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary).tag(Optional<AppModel.Selection>.none)
@@ -70,7 +70,7 @@ struct ContentView: View {
                         .tag(Optional<AppModel.Selection>.none)
                 }
                 ForEach(model.conflicts) { c in
-                    Label("충돌: \(c.targetId)", systemImage: "exclamationmark.triangle.fill")
+                    Label("어긋남: \(model.item("changes", c.targetId)?.name ?? c.targetId)", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .tag(AppModel.Selection.change(c.targetId))
                 }
@@ -84,7 +84,7 @@ struct ContentView: View {
                         .tag(AppModel.Selection.change(c.id))
                 }
             }
-            Section("Products") {
+            Section("제품") {
                 ForEach(model.products) { p in
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
@@ -109,7 +109,7 @@ struct ContentView: View {
                     NewProductSheet(prefill: $newProductName)
                 }
             }
-            Section("Changes") {
+            Section("할 일") {
                 ForEach(activeChanges) { c in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.name)
@@ -123,15 +123,15 @@ struct ContentView: View {
                 Label("에이전트 위임 · 어긋남 감시", systemImage: "cpu")
                     .tag(AppModel.Selection.agents)
                 HStack {
-                    Text("감지된 Agent: \(model.availableAgents().joined(separator: ", ").isEmpty ? "없음" : model.availableAgents().joined(separator: ", "))")
+                    Text(model.availableAgents().isEmpty ? "감지된 에이전트: 없음" : "감지된 에이전트: \(model.availableAgents().joined(separator: ", "))")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
             Section("") {
-                Label("Settings", systemImage: "gearshape")
+                Label("설정", systemImage: "gearshape")
                     .tag(AppModel.Selection.settings)
             }
-            Section("Workbench") {
+            Section("메모함") {
                 ForEach(model.workbenchItems.filter { !["promoted", "archived"].contains($0.status) }) { w in
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
@@ -292,13 +292,13 @@ struct PortfolioSummaryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Portfolio").font(.title2.bold())
+                Text("내 제품판").font(.title2.bold())
                 Text(model.summaryText()).font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 16) {
-                    stat("\(model.products.count)", "Products")
-                    stat("\(model.items.filter { $0.type == "changes" }.count)", "Changes")
-                    stat("\(model.needsYouCount)", "Needs You", accent: model.needsYouCount > 0)
-                    stat("\(model.workspaceRevision)", "Workspace Rev")
+                    stat("\(model.products.count)개", "제품")
+                    stat("\(model.items.filter { $0.type == "changes" }.count)개", "할 일")
+                    stat("\(model.needsYouCount)건", "결정 대기", accent: model.needsYouCount > 0)
+                    stat("\(model.workspaceRevision)", "문서 개정")
                 }
                 Divider()
                 Text("메모 남기기 — 먼저 담고 나중에 옮깁니다").font(.headline)
@@ -405,8 +405,8 @@ struct PortfolioSummaryView: View {
                         mini("개발", h.development)
                         mini("운영", h.operations)
                         mini("배포", h.distribution)
-                        mini("출시준비", h.launchReadiness >= 80 ? "healthy" : h.launchReadiness >= 40 ? "warning" : "critical", "\(h.launchReadiness)%")
-                        mini("Context", (h.contextDrift + h.pendingProposals) == 0 ? "healthy" : "warning")
+                        mini("출시 준비", h.launchReadiness >= 80 ? "충분" : h.launchReadiness >= 40 ? "부족함" : "막힘", "\(h.launchReadiness)%")
+                        mini("컨텍스트", (h.contextDrift + h.pendingProposals) == 0 ? "healthy" : "warning")
                     }
                 }
                 .padding(6)
@@ -500,8 +500,8 @@ struct ProductDetailView: View {
             healthChip("개발", h.development)
             healthChip("운영", h.operations)
             healthChip("배포", h.distribution)
-            healthChip("출시준비", h.launchReadiness >= 80 ? "healthy" : h.launchReadiness >= 40 ? "warning" : "critical", value: "\(h.launchReadiness)%")
-            healthChip("Context", h.contextDrift == 0 && h.pendingProposals == 0 ? "healthy" : "warning", value: "drift \(h.contextDrift)·제안 \(h.pendingProposals)")
+            healthChip("출시 준비", h.launchReadiness >= 80 ? "healthy" : h.launchReadiness >= 40 ? "warning" : "critical", value: "\(h.launchReadiness)%")
+            healthChip("컨텍스트", h.contextDrift == 0 && h.pendingProposals == 0 ? "healthy" : "warning", value: "어긋남 \(h.contextDrift)·제안 \(h.pendingProposals)")
         }
         XCard("다음 릴리즈 \u{2014} \(h.nextRelease ?? "계획 없음")") {
             VStack(alignment: .leading, spacing: 4) {
@@ -2263,7 +2263,7 @@ struct PlanLane<Content: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title).font(.subheadline.bold())
-                    Text("\(count)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Text("\(count)개").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     if weeks > 0 {
                         Text("Σ \(weeks)w").font(.caption2.monospaced())

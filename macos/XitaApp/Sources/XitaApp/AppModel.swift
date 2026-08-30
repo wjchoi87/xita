@@ -145,7 +145,7 @@ public final class AppModel: ObservableObject {
                 id: c["id"] as? String ?? "-",
                 type: c["type"] as? String ?? "-",
                 revision: (c["revision"] as? NSNumber)?.uint64Value ?? 0,
-                name: c["name"] as? String ?? (c["id"] as? String ?? "-"),
+                name: Self.displayName(c["name"] as? String, id: c["id"] as? String ?? "-"),
                 status: c["status"] as? String ?? "-",
                 product: c["product"] as? String ?? "",
                 kind: c["kind"] as? String ?? "",
@@ -154,7 +154,7 @@ public final class AppModel: ObservableObject {
         }
         .sorted { ($0.type, $0.name) < ($1.type, $1.name) }
         let raw = (try? bridge.conflicts(path: workspaceDir)) ?? []
-        conflicts = raw.map { c in
+        conflicts = Dictionary(grouping: raw) { $0["target_id"] as? String ?? "?" }.map { ($0.value.first ?? [:]) }.map { c in
             ConflictInfo(
                 opId: c["op_id"] as? String ?? "?",
                 targetId: c["target_id"] as? String ?? "?",
@@ -248,7 +248,7 @@ public final class AppModel: ObservableObject {
             return d >= cutoff
         }
         func n(_ t: String) -> Int { recent.filter { $0.type == t }.count }
-        return "최근 \(days)일 — 완료 Change \(n("CHANGE_APPROVED") + n("CHANGE_SHIPPED"))건 · 릴리즈 \(n("RELEASED"))건 · 새 결정 \(n("MAJOR_DECISION"))건 · 제안 \(n("PROPOSAL_CREATED"))건 · 차단 \(n("SHIP_BLOCKER"))건 · 이벤트 \(recent.count)건"
+        return "최근 \(days)일 — 완료한 할 일 \(n("CHANGE_APPROVED") + n("CHANGE_SHIPPED"))건 · 출시 \(n("RELEASED"))건 · 새 결정 \(n("MAJOR_DECISION"))건 · 제안 \(n("PROPOSAL_CREATED"))건 · 차단 \(n("SHIP_BLOCKER"))건 · 이벤트 \(recent.count)건"
     }
 
     // ---- Milestones (Linear-style: weighted progress·focus·overdue) -------------
@@ -266,6 +266,19 @@ public final class AppModel: ObservableObject {
         public var isFocus: Bool
 
         public static func == (lhs: MilestoneInfo, rhs: MilestoneInfo) -> Bool { lhs.milestoneId == rhs.milestoneId }
+    }
+
+    /// 이름 없는 문서 대응: frontmatter name 없으면 id를 사람이 읽는 표기로 변환
+    /// ("ai-recommendation"→"AI Recommendation"). id 원문 노출 금지(2026-08-30 오너 감사)
+    static func displayName(_ raw: String?, id: String) -> String {
+        if let r = raw, !r.isEmpty, r != id { return r }
+        if id.contains("-m-"), let tail = id.split(separator: "-").last { return "마일스톤 \(tail)" }
+        let words = id.split(whereSeparator: { "-_".contains($0) }).map { part -> String in
+            guard !part.isEmpty else { return "" }
+            let cap = part.prefix(1).uppercased() + part.dropFirst()
+            return ["Ai": "AI", "Api": "API", "Mcp": "MCP", "Sso": "SSO", "Prd": "PRD"][cap] ?? cap
+        }
+        return words.joined(separator: " ")
     }
 
     /// ISO8601 full / date-only(2026-10-01) 모두 허용 (포매터 2개 직렬 시도)
