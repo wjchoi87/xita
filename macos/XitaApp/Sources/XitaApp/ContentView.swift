@@ -847,9 +847,34 @@ struct ProductDetailView: View {
                 }
             }
         }
-        ForEach(model.releases(for: product.id)) { r in
-            releaseCard(r)
+        /* 출시 기록 = changelog 형식 (Raycast/AnnounceKit VERIFIED 패턴: 월 헤더 + 버전칩)
+         * 변경 전 정책: 릴리스 카드 나열 — '언제 무엇을 세상에 냈나'의 시간 구조가 없음
+         * 변경 후 정책: release_date(없으면 생성시점) 기준 내림차순 + `YYYY년 M월` 헤더 그룹.
+         *   출시 기록 표면에만 날짜를 둔다(계획 레인은 날짜 금지 규칙의 대칭)
+         * 영향 범위: 렌더만. release 문서 필드 무변경 */
+        let rels = model.releases(for: product.id)
+        let grouped = Dictionary(grouping: rels) { r in
+            let f = model.docFields(type: "release", id: r.id)
+            // 날짜 우선순위: 실제 출시 → 목표일 → 생성일 (빈 문자열은 건너뜀)
+            let d = ["released_at", "release_date", "target_date", "created_at"]
+                .compactMap { f[$0] }.first { !$0.isEmpty } ?? ""
+            return String(d.prefix(7))
         }
+        ForEach(grouped.keys.sorted(by: >), id: \.self) { month in
+            if !month.isEmpty {
+                Text(monthLabel(month)).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                    .padding([.top, .leading], 4)
+            }
+            ForEach(grouped[month] ?? []) { r in
+                releaseCard(r)
+            }
+        }
+    }
+
+    private func monthLabel(_ ym: String) -> String {
+        let parts = ym.split(separator: "-")
+        guard parts.count == 2, let m = Int(parts[1]) else { return ym }
+        return "\(parts[0])년 \(m)월"
     }
 
     private func releaseCard(_ r: AppModel.Item) -> some View {
@@ -858,10 +883,14 @@ struct ProductDetailView: View {
         return XCard {
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
-                    Text(r.name).font(.headline)
+                    Text(r.name).font(.headline.monospaced())
                     Text(r.status).font(.caption.monospaced())
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(r.status == "RELEASED" ? Color.green.opacity(0.18) : .orange.opacity(0.15), in: Capsule())
+                    // 절대 날짜 — 출시 카드에만 (Raycast: 버전칩 + 날짜)
+                    if let rd = model.docFields(type: "release", id: r.id)["released_at"]?.prefix(10), !rd.isEmpty {
+                        Text(String(rd)).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Menu("상태 변경") {
                         ForEach(["PLANNED", "PREPARING", "READY", "SUBMITTED", "RELEASED", "ROLLED_BACK"], id: \.self) { st in

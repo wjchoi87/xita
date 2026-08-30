@@ -17,6 +17,7 @@ macOS(호스트, canonical authority)
                         (AsyncStorage 캐시 + 오프라인 Pending Op Queue, SecureStore 토큰)
 
 apps/cli                xita CLI (의존성 0, Agent/Automation 인터페이스)
+apps/cli/xita-mcp.mjs   MCP 서버(stdio) — 코딩 에이전트가 XITA를 도구로 사용
 macos/XitaCoreBridge    Swift↔Rust C ABI bridge (cdylib)
 ```
 
@@ -63,6 +64,8 @@ cd macos/XitaApp && swift run    # macOS GUI (XITA_WS 로 workspace 지정)
 
 - **마일스톤 & 디자인 시스템**: Milestone 엔티티(서버13종/Rust/Mac) — Linear식 **가중 진행률**(started부터)·focus·overdue·미배정 그룹, 제품 탭에 **로드맵**, change 이동 메뉴. 전체 UI를 XCard/XUI 토큰(8pt·단일 표면·상태색 원천)으로 통일. CLI: `milestone(s)/assign-milestone`
 - **Product OS 이관(§43 리서치 반영)**: `insight` 14번째 타입(관찰/가설/기회 — Ask가 인사이트로 근거 답변) · **Aha scorecard** `(P+N+S−E)×C` 파생 정렬(CLI `score`, Mac 채점 팝오버, roadmap 상위) · Shape Up pitch 필드(appetite/no_gos/rabbit_holes) · **Mission Card** handoff 선두 5블록(TS·Rust 동일) · **Dispatch 런 보드**(AWAITING_INPUT→Needs You CRITICAL 자동 승격, base_sha 스냅샷) · WHY 누락 게이트 · 4문장 Product 온보딩. CLI: `insight(s)/score/agent-update`
+- **UI v2 (경쟁 정밀독해 run 20260830)**: 화면 용어를 데이터에서 분리 — `XUI.term` 단일 사전으로 **할 일/메모/제안/위임/되는 것/출시 기록**(스키마는 change/workbench... 불변, Plane식 비파괴 라벨 교체) · **계획 탭 = Now/Next/Later 3레인**+Enter 퀵애드(마일스톤 자동상속)+Σ베팅 주수 경고 · **되는 것 4레인** 기능 리스트 · **Two-Layer 타임라인**(의미 마커 펼침/기계 이벤트 접힘/Show older) · **⌘K 커맨드 팔레트** · 출시 기록 월-그룹+released_at · 모바일 TERM parity · events `event_type` 캐논화. 근거: `research/` 4문서
+- **MCP 서버 (에이전트 인게스트)**: `node apps/cli/xita-mcp.mjs` (stdio JSON-RPC, 의존성 0) — Claude Code/Cursor/Codex 가 `.cursor/mcp.json` 등록 후 `xita_status → xita_handoff(Mission Card) → 작업 → xita_agent_update(RESULT_READY) → 사람이 Needs You에서 승인` 폐루프. 쓰기 도구는 agent_update/insight_add 2종뿐(나머지 읽기 전용 — Human decides 원칙). env: `XITA_HOST`(기본 3333), `XITA_DEVICE_TOKEN`
 
 ## 남은 로드맵
 1. macOS GUI 실동작 확인 + workspace 이관 polish

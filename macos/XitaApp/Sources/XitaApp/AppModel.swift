@@ -381,9 +381,15 @@ public final class AppModel: ObservableObject {
         _ = try applyMulti(target: "release", targetId: releaseId, baseRevision: r.revision, kind: "update_field", fields: [KV("change_ids", list.joined(separator: ";"))])
     }
 
+    /* RELEASED 시점 stamp — 출시 기록 changelog 월-그룹의 날짜원(AnnounceKit/Raycast: 날짜는 출시 표면 전용)
+     * target_date(계획 시점 표기)와 분리: 실제 RELEASED된 순간만 released_at 에 기록 */
     public func setReleaseStatus(id: String, status: String) throws {
         guard let r = item("releases", id) else { return }
-        _ = try applyMulti(target: "release", targetId: id, baseRevision: r.revision, kind: "update_field", fields: [KV("status", status)])
+        var fields: [KV] = [KV("status", status)]
+        if status == "RELEASED", (docFields(type: "release", id: id)["released_at"] ?? "").isEmpty {
+            fields.append(KV("released_at", ISO8601DateFormatter().string(from: Date())))
+        }
+        _ = try applyMulti(target: "release", targetId: id, baseRevision: r.revision, kind: "update_field", fields: fields)
         // RELEASED → 제품 version/current_release 동기 (§9)
         if status == "RELEASED" {
             let label = doc(type: "release", id: id)?.fields["version_label"] ?? r.name
