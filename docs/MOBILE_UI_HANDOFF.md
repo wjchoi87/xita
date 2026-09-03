@@ -37,3 +37,12 @@
 ## 작업 후 보고 경로
 - 이 창이 XITA MCP에 연결돼 있으면: `xita_agent_update(id, RESULT_READY, note)` / 발견한 사실은 `xita_insight_add`
 - 아니면: 이 문서 하단에 `## Run log` 추가
+
+## Run log (2026-09-04)
+- 결정 카드 3액션 구현: tap=상세 펼침 / swipe 우=승인 / swipe 좀=내일로 미루기(로컬 snooze). 거절은 상세 안의 명시 버튼(스와이프 사고 방지) — PanResponder 사용, 의존성 0
+- 순차 승인 모드: "위에서부터" → 1장 집중 렌더 + 처리 시 자동 다음장
+- 제안 resolve: 온라인=REST /v4/proposals/:id/resolve(자취 이벤트 보존), 오프라인=op 큐 폴백
+- Capture cold-open autofocus + KeyboardAvoidingView
+- 용어 parity 완성(products.tsx 사전 경유), 에러/충돌 표시, flush 큐 인덱스 버그 수정
+- 미이행: 푸시 알림(22~07 mute) — expo-notifications 미도입 원칙 유지, 인앱 배지로 대체
+- tsc green 유지

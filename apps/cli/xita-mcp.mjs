@@ -88,7 +88,7 @@ const TOOLS = [
     run: async (a) => {
       const [state, drift] = await Promise.all([
         api(`/v4/products/${encodeURIComponent(a.product)}/state`),
-        api('/v4/context/drift').catch(() => []),
+        api(`/v4/context/drift?product=${encodeURIComponent(a.product)}`).catch(() => []),
       ])
       return `${JSON.stringify(state, null, 1)}\n-- drift --\n${JSON.stringify(drift, null, 1)}`
     },

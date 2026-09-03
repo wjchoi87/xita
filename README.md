@@ -38,20 +38,25 @@ pnpm install
 pnpm v4:init            # canonical workspace 초기화(+데모)
 pnpm dev:server         # http://localhost:3333 (REST + SSE + sync)
 pnpm xita status        # CLI (XITA_HOST 로 호스트 지정)
+pnpm xita pair          # 모바일 페어링 코드 발급 — 앱에 입력 (10분 유효)
 pnpm mobile:start       # Expo 앱 (apps/mobile/README — 페어링 코드 입력)
-pnpm rust:test          # Rust core 테스트 (34)
+pnpm rust:test          # Rust core 테스트 (47)
 cd macos/XitaApp && swift run    # macOS GUI (XITA_WS 로 workspace 지정)
 ```
 
 ## 검증
 | 항목 | 결과 |
 |---|---|
-| `cargo test` (rust/xita-core) | 34 passed · clippy 0 |
-| `swift test` (XitaCoreBridge / XitaApp) | 4 / **12 passed** (capability·readiness·proposal·dispatch 포함) |
+| `cargo test` (rust/xita-core) | 47 passed · clippy 0 |
+| `swift test` (XitaCoreBridge / XitaApp) | 4 / **41 passed** (capability·readiness·proposal·dispatch 포함) |
 | server `tsc` + `eslint` | PASS / 0 |
 | mobile `tsc` | PASS |
 | 호스트 스모크 | v4 전체 도메인 CRUD · needs-you(REVIEW+SHIP_BLOCKER) · drift · pair/pull · SSE · AI 분류 · readiness 교차(Rust↔서버) · legacy 404 |
 | 사용자 확인 예정 | Expo 실기기 UI, macOS GUI, LAN 페어링 E2E |
+
+> **Sync 커서 규약(2026-09)**: incremental pull 의 커서는 전역 워크스페이스 리비전이며
+> 문서 비교는 쓰기 시 각인된 frontmatter `ws_rev` 로 한다 (문서별 `revision` 과 비교하면
+> 커서 이후 생성된 저 리비전 문서가 유실된다 — Rust/서버 동일 규칙, 회귀 테스트 고정).
 
 ## 문서
 - 제품 스펙: Obsidian 의 `XITA_PRODUCT_SPEC_v0.3/v0.4(REV-001)/v0.5`

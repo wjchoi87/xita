@@ -87,14 +87,41 @@ function requireArg(a, name, usage) {
 function usage() {
   console.log(`xita CLI — host: ${HOST}
 
-  xita status                          workspace revision + needs-you 요약
-  xita products                        제품/변경 목록
-  xita needs-you                       Human Decision Inbox
-  xita workbench                       workbench 아이템 목록
-  xita capture --title T [--content C] workbench intake (오프라인 큐 없음, 즉시 push)
-  xita handoff --product P --change C  Agent Handoff (markdown)
-  xita context --product P --change C  Context Projection (JSON)
-  xita drift --product P               Context Drift 검사`)
+  xita status                                 workspace revision + needs-you 요약
+  xita pair                                   모바일 페어링 코드 발급 (10분 유효)
+  xita products                               제품/변경 목록
+  xita needs-you                              Human Decision Inbox
+  xita closest                                완주 후보 (Closest to Ship)
+  xita timeline                               최근 자취(human-significant 이벤트)
+  xita search --q KEYWORD                     정본 문서 검색
+  xita workbench                              메모(workbench) 목록
+  xita capture --title T [--content C]        메모 intake (오프라인 큐 없음, 즉시 push)
+  xita handoff --product P --change C         Agent Handoff (markdown, Mission Card)
+  xita context --product P [--change C]       Handoff 전문 (alias)
+  xita drift --product P                      Context Drift 검사
+  xita observe --product P --github OWNER/REPO | --linear TEAM | --figma FILE
+                                              외부 관측 → 참조 요약 upsert
+  xita agent-result --change C --summary S    에이전트 결과 import (Review+Proposal 생성)
+  xita reviews [--product P]                  리뷰 패키지 목록
+  xita approve --change C                     §51 승인 (capability 적용→SHIPPED)
+  xita request-changes --change C [--note N]  재작업 요청
+  xita health --product P                     제품 건강 요약
+  xita releases [--product P]                 출시 기록
+  xita release-add --product P --name N       출시 생성
+  xita release-readiness --release R          출시 준비도
+  xita roadmap --product P                    우선순위 정렬 로드맵 (scorecard 파생)
+  xita score --change C --pop N --need N --strat N --effort N --conf N
+                                              Aha scorecard 채점
+  xita insight --product P --title T --content C [--kind K]
+  xita insights [--product P]                 관찰/가설 목록
+  xita agent-update --id D --status S [--note N]  위임 런 상태 보고
+  xita ask "질문"                             근거 있는 답변 (Historical Explanation)
+  xita summarize                              최근 이력 요약 (Historian)
+  xita patch --artifact A                     아티팩트 패치 제안 생성
+  xita patches [--artifact A]                 대기 패치 목록
+  xita patch-apply --patch P                  패치 적용 (낙관적 동시성)
+  xita milestones [--product P] | milestone --id M | assign-milestone --change C --milestone M
+  xita bio --product P                        제품 약력 (Biography)`)
 }
 
 async function main() {
@@ -124,6 +151,21 @@ async function main() {
         }
       }
       console.log(lines.join('\n'))
+      return
+    }
+
+    case 'pair': {
+      const pairing = await post('/devices/pair', { host_identity: 'xita-host' })
+      const mins = Math.max(1, Math.round(((pairing.expires_at ?? 0) - Date.now()) / 60000))
+      console.log(
+        [
+          '모바일 앱의 호스트 연결 화면에서 이 코드를 입력하세요:',
+          '',
+          `    ${pairing.code}`,
+          '',
+          `(${mins}분간 유효 — 만료되면 다시 xita pair)`,
+        ].join('\n')
+      )
       return
     }
 

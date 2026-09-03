@@ -581,3 +581,46 @@ v0.4 §17 'Superseded Assumptions' 에 따라 아래를 **삭제**했습니다:
 
 **미이관 백로그(근거 있음, 의도적 보류)**
 Cycle 타임박스·Intake 격리·Betting Table/Hill Chart·Goal-metric 롤업(Plane Initiatives/Leantime Strategy)·retro 자동생성·comment 프리미티브(Huly)·MCP 인게스트·workflow YAML(Plane Compose)·forecast(leadtime)·major/minor 문서표기(Huly QMS)·Release changelog/다중소속 분리.
+
+---
+
+## 44. 설계 적합성 전수 감사 + 리팩토링 (2026-09-04, 오너 지적 "의도대로 안 됐다")
+
+설계문서(Part A~F + research 4문서 + MOBILE_UI_HANDOFF)를 기준으로 4개 표면을 독립 감사 → 발견 결함 전량 수정. 원칙: 기능은 설계 의도대로, 화면은 사람 언어, 실패는 조용히 묻지 않는다.
+
+**치명 결함(사용자 눈에 기능이 깨진 것) 5건**
+1. 모바일 제품 탭이 영원히 비었음 — `type === 'products'`(복수형) 필터 오타 → 단수형 수정 + UiItem.product 투영 추가
+2. 모바일 flush() 가 CONFLICT op 를 지우고 정상 op 를 큐에 남김 — 필터 후 인덱스로 원배열 접근한 버그 → 1:1 순서 대응으로 수정, REJECTED 는 큐에서 내리고 안내
+3. 되는 것 4레인이 실질 1레인 — capabilities(for:) 가 active 만 반환 → 전체 반환(레인 버킷은 뷰 몫), 탭 사이클 시 항목 소멸 제거
+4. 자취 제품 필터 무효(`|| true`) — eventLog 가 product 까지 반환해 실제 필터링
+5. change id 전역 slug 충돌 — 제품이 달라도 같은 제목이면 충돌/덮어쓰기 → Mac/서버 모두 unique-suffix(-2,-3) 규칙
+
+**교차 런타임 계약 결함 4건**
+1. **sync 커서 의미 결함(유실)**: 커서=전역 워크스페이스 리비전인데 문서의 엔티티 revision 과 비교 → 커서 이후 생성된 저리비전 문서 영구 유실. **쓰기 시 frontmatter `ws_rev` 각인 + pull 은 ws_rev 비교(레거시는 revision 폴백)** 로 Rust/서버 동시 수정, 회귀 테스트+라이브 E2E(커서 15 → 신규 문서 수신) 고정
+2. lifecycle 가드 우회: update_field 로 status 바꾸면 전이 표 무시됨 — **Rust(kind 불문 Change+status 필드 검증)와 서버 sync push 경로(revision.ts, domain 표 재사용) 양쪽에 가드**, REJECTED 결과 신설. E2E: IDEA→SHIPPED 우회 REJECTED / IDEA→PLAN APPLIED
+3. 타입 집합 불일치: Rust 14종(patch 누락), 서버 push validator 12종 — Rust 15종(Patch 추가: storage/sync/index/bridge), 서버 validator+docs/:type 15종 정렬
+4. approve_change 출발 상태 무검증 — REVIEW/SHIP_READY 게이트를 Rust/서버 양쪽에, 서버 dead conditional 제거
+
+**사람 언어/실패 표면화(macOS)**
+- raw 노출 제거: 상태/우선순위/전이 메뉴/충돌 메뉴/kind/Product 용어/마일스톤 id 조각/product id/rev 표기/BACKLOG/WHY 없음 → 전부 XUI.term*
+- 실패 침묵 제거: 생성·삭제·승격·저장 플로우 do/catch + lastError 배너. NewProductSheet 는 성공 시에만 닫힘
+- ⌘K 팔레트: ↑↓ 목록 탐색+하이라이트, paletteQuestion 을 Home Ask 카드가 소비(폐루프 완성)
+- Home: 에이전트 대기 줄·충돌·검토 대기 통합 + **거절한 제안 이력 노출**(Rejected Stays Visible)
+
+**모바일 UI v2 계약 이행(MOBILE_UI_HANDOFF acceptance)**
+- 결정 카드 3액션: tap=상세 펼침 / swipe 우=승인 / swipe 좀=내일로 미루기(로컬 snooze, PanResponder — 의존성 0)
+- 순차 승인 모드: "위에서부터" → 1장 집중 렌더, 처리 시 자동 다음
+- 제안 승인/거절은 온라인 시 REST /v4/proposals/:id/resolve(PROPOSAL_RESOLVED 자취 보존), 오프라인은 op 큐 폴백
+- Capture cold-open: autoFocus + KeyboardAvoidingView, 제품/종류 선택 강요 없음
+- 용어 parity: 모든 라벨 term()/statusKo()/actionKo() 경유, 알림은 의존성 미도입 원칙대로 인앱 배지 대체
+
+**그 외**
+- applyField 도 SSE 브로드캐스트(sync push 갱신이 실시간 구독자에게 보임), sync/status·conflicts 인증 실패 401 일관화, op_id 정확 매칭, MCP xita_context drift product 파라미터 수정, CLI usage() 실명령 동기화 + `xita pair`(모바일 페어링 코드 발급), env.ts AI/관측 토큰 선언, README/rust README stale 수치 갱신
+
+**후속 정리(같은 날)**
+- ContentView.swift(2,471줄) 분해 → ContentView + Views/ 10파일(상위 선언 단위 이동, 동작 변경 0). 용어 스캐너 테스트는 분해된 화면 소스 전체를 스캔하도록 확장
+- 디자인 토큰을 §42 기록값(pad 12·gap 10·radius 10)으로 고정, 상태색 정의를 XUI.statusColor 로 수렴(중복 정의 2건 제거)
+- **MenuBarExtra**: 앱 밖에서 Needs You 카운트/대기 목록 확인 + 3초 메모 캡처 + 앱 열기(Q13 네이티브 capability)
+- ⌘K 팔레트에 "메모 담기" 액션(캡처 무결정 원칙 — 제품 귀속은 승인 때), 모바일 충돌 행에 "Mac 버전 유지" 정리 버튼
+
+검증: rust 47 tests · clippy 0 · swift bridge 4 + app **41**(회귀 2 추가) · server tsc/eslint 0 · mobile tsc 0 · 라이브 E2E(커서·가드·milestone push) PASS
