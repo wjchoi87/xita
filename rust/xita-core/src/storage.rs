@@ -35,6 +35,7 @@ pub enum EntityType {
     Review,
     Reference,
     Dispatch,
+    Patch,
     Milestone,
     Insight,
 }
@@ -54,6 +55,7 @@ impl EntityType {
             Self::Review => "reviews",
             Self::Reference => "references",
             Self::Dispatch => "dispatches",
+            Self::Patch => "patches",
             Self::Milestone => "milestones",
             Self::Insight => "insights",
         }
@@ -186,6 +188,10 @@ impl Workspace {
 
     /// canonical mutation. base_revision 를 주면 mismatch 시 `RevisionConflict`.
     /// 다음 revision 을 반환한다.
+    ///
+    /// 동시에 frontmatter `ws_rev` 에 이 쓰기가 속한 워크스페이스 리비전을 각인한다.
+    /// sync incremental pull 의 커서는 이 전역 값과 비교해야 한다 — 엔티티 `revision` 은
+    /// 문서별 카운터라 커서(전역)와 비교하면 변경이 유실된다(§14 결함 수정).
     pub fn write_entity(
         &self,
         ty: EntityType,
@@ -208,13 +214,14 @@ impl Workspace {
             }
         }
         let next = current + 1;
-        // canonical: frontmatter 의 revision 을 next 로 갱신한 복사본을 쓴다.
+        let ws_next = self.bump_workspace_revision()?;
+        // canonical: frontmatter 의 revision/ws_rev 을 갱신한 복사본을 쓴다.
         let mut updated = doc.clone();
         set_field(&mut updated, "revision", format!("{}", next));
+        set_field(&mut updated, "ws_rev", format!("{}", ws_next));
         let dir = self.entity_dir(ty);
         fs::create_dir_all(&dir).map_err(|_| CoreError::PermissionDenied)?;
         atomic_write(&path, &doc::serialize(&updated))?;
-        self.bump_workspace_revision()?;
         Ok(next)
     }
 

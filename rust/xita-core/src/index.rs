@@ -26,13 +26,22 @@ pub struct IndexMeta {
     pub docs: Vec<IndexEntry>,
 }
 
-const ALL_TYPES: [EntityType; 6] = [
+const ALL_TYPES: [EntityType; 15] = [
     EntityType::Product,
     EntityType::Change,
     EntityType::Decision,
     EntityType::Artifact,
     EntityType::Workbench,
     EntityType::Release,
+    EntityType::Capability,
+    EntityType::Readiness,
+    EntityType::Proposal,
+    EntityType::Review,
+    EntityType::Reference,
+    EntityType::Dispatch,
+    EntityType::Patch,
+    EntityType::Milestone,
+    EntityType::Insight,
 ];
 
 pub struct IndexEngine;
@@ -158,6 +167,15 @@ fn type_from_dir(dir: &str) -> Option<EntityType> {
         "artifacts" => Some(EntityType::Artifact),
         "workbench" => Some(EntityType::Workbench),
         "releases" => Some(EntityType::Release),
+        "capabilities" => Some(EntityType::Capability),
+        "readiness" => Some(EntityType::Readiness),
+        "proposals" => Some(EntityType::Proposal),
+        "reviews" => Some(EntityType::Review),
+        "references" => Some(EntityType::Reference),
+        "dispatches" => Some(EntityType::Dispatch),
+        "patches" => Some(EntityType::Patch),
+        "milestones" => Some(EntityType::Milestone),
+        "insights" => Some(EntityType::Insight),
         _ => None,
     }
 }

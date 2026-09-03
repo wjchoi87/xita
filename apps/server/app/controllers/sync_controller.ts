@@ -28,6 +28,9 @@ const pushValidator = vine.compile(
           'review',
           'reference',
           'dispatch',
+          'patch',
+          'milestone',
+          'insight',
         ]),
         target_id: vine.string(),
         base_revision: vine.number(),
@@ -89,15 +92,15 @@ export default class SyncController {
     return { data: await syncService.push(payload.ops) }
   }
 
-  async status({ request }: HttpContext) {
-    const device = await this.auth(request.header('x-device-token'), undefined as never)
-    if (!device) return { data: { unauthorized: true } }
+  async status({ request, response }: HttpContext) {
+    const device = await this.auth(request.header('x-device-token'), response)
+    if (!device) return
     return { data: await syncService.status() }
   }
 
-  async conflicts({ request }: HttpContext) {
-    const device = await this.auth(request.header('x-device-token'), undefined as never)
-    if (!device) return { data: { unauthorized: true } }
+  async conflicts({ request, response }: HttpContext) {
+    const device = await this.auth(request.header('x-device-token'), response)
+    if (!device) return
     return { data: await syncService.conflicts() }
   }
 

@@ -466,6 +466,9 @@ export default class V4OpsController {
       'review',
       'reference',
       'dispatch',
+      'patch',
+      'milestone',
+      'insight',
     ]
     if (!allowed.includes(params.type)) {
       return { data: [], meta: { error: 'unknown type' } }

@@ -556,10 +556,15 @@ export class V4Ops {
     return { review, change: await this.stores.change.read(changeId) }
   }
 
-  /** §51 Change Approval — Capability 적용 → SHIPPED → Timeline → 상태 반영 */
+  /** §51 Change Approval — Capability 적용 → SHIPPED → Timeline → 상태 반영.
+   *  승인 전제는 검토 중(REVIEW/SHIP_READY) — 그 외 출발 상태는 거부(Rust 코어와 동일 게이트). */
   async approveChange(changeId: string) {
     const change = await this.stores.change.read(changeId)
     if (!change) throw new Error(`change not found: ${changeId}`)
+    const from = (change.meta.status as string) ?? 'IDEA'
+    if (from !== 'REVIEW' && from !== 'SHIP_READY' && from !== 'SHIPPED') {
+      throw new Error(`approval requires REVIEW/SHIP_READY (current: ${from})`)
+    }
     const productId = (change.meta.product as string) ?? ''
     const caps = decodeCapChanges(change.meta.capability_changes)
     for (const e of caps) {
@@ -589,34 +594,19 @@ export class V4Ops {
         (r.revision ?? 0) + 1
       )
     }
-    const from = (change.meta.status as string) ?? 'IDEA'
     if (from !== 'SHIPPED') {
-      const to = from === 'REVIEW' ? 'SHIP_READY' : from
-      if (to === 'SHIP_READY') {
-        await this.stores.change.upsert(
-          changeId,
-          {
-            ...change.meta,
-            status: 'SHIPPED',
-            stage: 'ship',
-            shipped_at: new Date().toISOString(),
-          },
-          change.body,
-          (change.revision ?? 0) + 1
-        )
-      } else {
-        await this.stores.change.upsert(
-          changeId,
-          {
-            ...change.meta,
-            status: 'SHIPPED',
-            stage: 'ship',
-            shipped_at: new Date().toISOString(),
-          },
-          change.body,
-          (change.revision ?? 0) + 1
-        )
-      }
+      // 승인 = 검토 통과 + 출시 — REVIEW/SHIP_READY 어디서든 SHIPPED 로 (§51, 라이프사이클 예외 경로)
+      await this.stores.change.upsert(
+        changeId,
+        {
+          ...change.meta,
+          status: 'SHIPPED',
+          stage: 'ship',
+          shipped_at: new Date().toISOString(),
+        },
+        change.body,
+        (change.revision ?? 0) + 1
+      )
       await this.recordEvent({
         eventType: 'CHANGE_APPROVED',
         product: productId,

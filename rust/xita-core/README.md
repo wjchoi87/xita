@@ -10,7 +10,7 @@ macOS 구현의 Domain·Storage·Revision·Conflict·Sync semantics 를 소유�
 ```bash
 cd rust/xita-core
 cargo build
-cargo test    # 34 tests (Storage 7 + Operation/Conflict 5 + Sync 5 + Git 4 + Agent 4 + Index 3 + golden 2 + API 1 + 기타 3)
+cargo test    # 47 tests (Storage 6 + Operation/Conflict 12 + Sync 6 + Git 5 + Agent 7 + Index 3 + Bridge 2 + golden 5 + 기타)
 swift test    # 4 tests (open / create·update / conflict+typed error / pull) — macos/XitaCoreBridge
 cargo clippy --all-targets   # 0 warnings
 ```
@@ -68,7 +68,11 @@ src/
 cd rust/xita-core && cargo build --release          # target/release/libxita_core.dylib
 cd macos/XitaCoreBridge && XITA_RUST_LIB=$PWD/../../../rust/xita-core/target/release swift test
 ```
-- C ABI: `xita_ws_open / xita_ws_apply_op / xita_ws_pull / xita_ws_index_rebuild / xita_free_string`
+- C ABI 18종+free: `xita_ws_open / xita_ws_apply_op / xita_ws_apply_op_multi / xita_ws_pull /
+  xita_ws_index_rebuild / xita_build_handoff / xita_detect_agents / xita_git_inspect /
+  xita_ws_conflicts / xita_ws_get_doc / xita_valid_transitions / xita_ws_set_body /
+  xita_apply_ship_template / xita_patch_readiness / xita_ship_template_preview /
+  xita_ws_approve_change / xita_ws_readiness / xita_free_string` (전 목록은 bridge.rs)
 - 오류: JSON `{ok:false, code, message, recoverable}` → Swift 는 `XitaBridgeError.rust(code, message)` 로 변환
 
 ## 다음 단계

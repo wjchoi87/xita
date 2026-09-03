@@ -270,6 +270,7 @@ fn type_from_dir(dir: &str) -> Option<EntityType> {
         "review" | "reviews" => Some(EntityType::Review),
         "reference" | "references" => Some(EntityType::Reference),
         "dispatch" | "dispatches" => Some(EntityType::Dispatch),
+        "patch" | "patches" => Some(EntityType::Patch),
         "milestone" | "milestones" => Some(EntityType::Milestone),
         "insight" | "insights" => Some(EntityType::Insight),
         _ => None,

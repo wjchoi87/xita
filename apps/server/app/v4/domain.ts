@@ -24,6 +24,12 @@ const ALLOWED: Record<string, string[]> = {
   PAUSED: ['PLAN', 'BUILD', 'CANCELLED'],
   CANCELLED: [],
 }
+/** lifecycle 단일 소스 검증 (Rust lifecycle.rs와 동일 표) — sync push 가드 공용 */
+export function isValidTransition(from: string, to: string): boolean {
+  const next = ALLOWED[String(from ?? '').toUpperCase()]
+  return Array.isArray(next) && next.includes(String(to ?? '').toUpperCase())
+}
+
 const STAGE: Record<string, string> = {
   IDEA: 'idea',
   PLAN: 'plan',

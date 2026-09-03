@@ -209,8 +209,14 @@ impl OperationEngine {
         };
 
         let verdict = classify(op.base_revision, canonical_rev, &op.fields);
-        // Lifecycle guard (§13/§78): revision 일치 후 update_status 는 전이 테이블 검증.
-        if op.kind == OpKind::UpdateStatus && verdict != Verdict::Conflict {
+        // Lifecycle guard (§13/§78, §34-4 "위반은 REJECTED"): Change 의 status 필드는
+        // kind(update_status/update_field 불문)와 무관하게 전이 테이블 단일 소스로 검증.
+        // create 는 초기 상태 지정이므로 제외. 충돌(CONFLICT)은 사람 판단 대상이라 먼저 분류.
+        if op.target == EntityType::Change
+            && op.kind != OpKind::Create
+            && verdict != Verdict::Conflict
+            && op.fields.iter().any(|(k, _)| k == "status")
+        {
             if let Some((_, to_val)) = op.fields.iter().find(|(k, _)| k == "status") {
                 let from = doc
                     .fields
@@ -521,6 +527,57 @@ mod lifecycle_guard_tests {
         assert_eq!(good.status, "APPLIED");
     }
 
+    /// 회귀: kind=update_field 로 status 를 바꾸면 전이 표을 우회할 수 있었다(§34-4 위반).
+    /// 이제 Change 의 status 필드는 kind 불문 검증된다.
+    #[test]
+    fn update_field_status_bypass_is_rejected() {
+        let (ws, _t) = ws();
+        let e = OperationEngine::new(ws.clone());
+        e.apply(&Operation {
+            version: OPERATION_VERSION,
+            op_id: "b1".into(),
+            device_id: "d".into(),
+            target: EntityType::Change,
+            target_id: "c1".into(),
+            base_revision: 0,
+            kind: OpKind::Create,
+            fields: vec![("status".to_string(), FmValue::Scalar("IDEA".into()))],
+        })
+        .unwrap();
+        let bypass = e.apply(&Operation {
+            version: OPERATION_VERSION,
+            op_id: "b2".into(),
+            device_id: "d".into(),
+            target: EntityType::Change,
+            target_id: "c1".into(),
+            base_revision: 1,
+            kind: OpKind::UpdateField,
+            fields: vec![
+                ("summary".to_string(), FmValue::Scalar("설명".into())),
+                ("status".to_string(), FmValue::Scalar("SHIPPED".into())),
+            ],
+        })
+        .unwrap();
+        assert_eq!(bypass.status, "REJECTED", "update_field 경유 status 변경도 전이 표를 우회하지 못한다");
+        // 같은 op 이라도 유효 전이면 통과
+        let ok = e.apply(&Operation {
+            version: OPERATION_VERSION,
+            op_id: "b3".into(),
+            device_id: "d".into(),
+            target: EntityType::Change,
+            target_id: "c1".into(),
+            base_revision: 1,
+            kind: OpKind::UpdateField,
+            fields: vec![
+                ("summary".to_string(), FmValue::Scalar("설명".into())),
+                ("status".to_string(), FmValue::Scalar("PLAN".into())),
+            ],
+        })
+        .unwrap();
+        assert_eq!(ok.status, "APPLIED");
+        assert_eq!(ok.message, "applied");
+    }
+
     #[test]
     fn delete_removes_file_and_body_edit_persists() {
         let (ws, _t) = ws();
@@ -591,8 +648,13 @@ pub fn cap_changes_of(doc: &Doc) -> Vec<(String, String)> {
 
 /// §51 Change Approval — Capability 적용 → Review 승인 → SHIPPED → Timeline.
 /// Mac/앱 단독 구동에서도 서버 ops와 동일 semantics 로 승인할 수 있다.
+/// 승인 전제는 검토 중(REVIEW/SHIP_READY) — 그 외 출발 상태는 REJECTED 로 게이트.
 pub fn approve_change(ws: &Workspace, change_id: &str) -> Result<Outcome> {
     let change = ws.read_entity(EntityType::Change, change_id)?;
+    let from = meta_str(&change, "status").unwrap_or_default();
+    if from != "REVIEW" && from != "SHIP_READY" {
+        return Err(CoreError::OperationRejected);
+    }
     let product = meta_str(&change, "product").unwrap_or_default();
     let mut applied = 0usize;
 
@@ -697,6 +759,24 @@ mod approve_tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         Workspace::open(&dir).unwrap()
+    }
+
+    /// 회귀: §51 승인은 검토 중(REVIEW/SHIP_READY)에서만 — IDEA 등에서 바로 출시 금지.
+    #[test]
+    fn approve_requires_review_origin() {
+        let ws = ws();
+        let e = OperationEngine::new(ws.clone());
+        e.apply(&Operation {
+            version: OPERATION_VERSION, op_id: "ar1".into(), device_id: "m".into(),
+            target: EntityType::Change, target_id: "early".into(), base_revision: 0,
+            kind: OpKind::Create, fields: vec![
+                ("product".to_string(), FmValue::Scalar("novel".into())),
+                ("status".to_string(), FmValue::Scalar("BUILD".into())),
+            ],
+        })
+        .unwrap();
+        let err = approve_change(&ws, "early").unwrap_err();
+        assert_eq!(err, CoreError::OperationRejected);
     }
 
     #[test]

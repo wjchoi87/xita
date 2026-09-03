@@ -65,6 +65,9 @@ export class MarkdownStore {
   /**
    * Create 또는 Update. entity revision 을 1 증가시켜 canonical 저장.
    * 편의 파라미터: nextRevision 을 주면 해당 revision 강제(create 라이프사이클 등).
+   *
+   * 워크스페이스 리비전을 먼저 bump 한 뒤 그 값을 frontmatter `ws_rev` 에 각인한다 —
+   * sync incremental pull 의 커서(전역)가 비교 대상이다 (문서별 revision 과 비교하면 유실).
    */
   async upsert(
     id: string,
@@ -75,10 +78,12 @@ export class MarkdownStore {
     const existing = await this.read(id)
     const current = existing?.revision ?? 0
     const revision = nextRevision ?? current + 1
+    const wr = await bumpWorkspaceRevision(1)
     const fullMeta = {
       id,
       type: this.type,
       revision,
+      ws_rev: wr,
       updated_at: new Date().toISOString(),
       ...(existing
         ? { created_at: existing.meta.created_at }
@@ -86,7 +91,6 @@ export class MarkdownStore {
       ...meta,
     }
     await atomicWrite(docPath(this.type, id), serializeDoc(fullMeta, body))
-    const wr = await bumpWorkspaceRevision(1)
 
     // Realtime(SPEC §8): canonical mutation 을 SSE 구독자에게 브로드캐스트.
     EventBus.emit('xita.timeline', {
@@ -111,20 +115,34 @@ export class MarkdownStore {
 
   /**
    * 안전한 단일 필드 갱신 (v0.4 §12: clearly-safe / non-overlap 자동 적용).
-   * entity revision 증가 + workspace revision 증가.
+   * entity revision 증가 + workspace revision 증가 + ws_rev 각인 + SSE 브로드캐스트
+   * (sync push 경유 갱신도 Realtime 구독자에게 보이도록 — SPEC §8).
    */
   async applyField(id: string, field: string, value: unknown): Promise<StoredDoc | null> {
     const existing = await this.read(id)
     if (!existing) return null
     const nextRev = (existing.revision ?? 0) + 1
+    const wr = await bumpWorkspaceRevision(1)
     const fullMeta = {
       ...existing.meta,
       [field]: value,
       revision: nextRev,
+      ws_rev: wr,
       updated_at: new Date().toISOString(),
     }
     await atomicWrite(existing.path, serializeDoc(fullMeta, existing.body))
-    await bumpWorkspaceRevision(1)
+    EventBus.emit('xita.timeline', {
+      event_type: 'DOC_UPDATED',
+      doc_type: this.type,
+      id,
+      revision: nextRev,
+      name:
+        ((fullMeta as Record<string, unknown>).name as string | undefined) ??
+        ((fullMeta as Record<string, unknown>).title as string | undefined) ??
+        id,
+      status: ((fullMeta as Record<string, unknown>).status as string | undefined) ?? null,
+      workspace_revision: wr,
+    })
     return { ...existing, revision: nextRev, meta: fullMeta }
   }
 

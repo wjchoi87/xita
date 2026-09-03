@@ -64,9 +64,11 @@ export class SyncService {
     }> = []
     for (const t of EDITABLE_TYPES) {
       const all = await this.stores[t].list()
-      // incremental pull: revision > cursor 만
+      // incremental pull: 커서(전역 워크스페이스 리비전)는 문서의 ws_rev(쓰기 시점 각인)와
+      // 비교한다. ws_rev 없는 레거시 문서는 엔티티 revision 폴백(과다 포함은 클라이언트 dedupe).
       for (const d of all) {
-        if (typeof cursor === 'number' && (d.revision ?? 0) <= cursor) continue
+        const wsRev = typeof d.meta.ws_rev === 'number' ? d.meta.ws_rev : (d.revision ?? 0)
+        if (typeof cursor === 'number' && wsRev <= cursor) continue
         docs.push({ id: d.id, type: d.type, revision: d.revision, meta: d.meta, body: d.body })
       }
     }
@@ -88,6 +90,8 @@ export class SyncService {
       const res = await this.engine.applyOperation(op)
       if (res.status === 'APPLIED') {
         await this.recordOp(op)
+      } else if (res.status === 'REJECTED') {
+        // 거부는 충돌이 아니라 무효 op — needs_you 로 승격하지 않고 결과로만 돌려준다
       } else {
         conflicts.push({ ...op, canonicalRevision: res.canonicalRevision })
         await this.recordConflict({
@@ -137,7 +141,14 @@ export class SyncService {
   private async seen(opId: string): Promise<boolean> {
     const raw = await readText(path.join(metaDir(), 'ops.jsonl'))
     if (!raw) return false
-    return raw.split('\n').some((l) => l.includes(`"op_id":"${opId}"`))
+    // 부분문자열 매칭 금지 — op_id 정확 일치만 (오검출 방지)
+    return raw.split('\n').some((l) => {
+      try {
+        return (JSON.parse(l) as { op_id?: string }).op_id === opId
+      } catch {
+        return false
+      }
+    })
   }
 
   private async recordOp(op: Operation) {
@@ -218,11 +229,13 @@ export class SyncService {
         applied++
       } else {
         conflicts.push(res)
-        await this.recordConflict({
-          ...op,
-          canonicalRevision: res.canonicalRevision,
-          status: 'needs_you',
-        })
+        if (res.status === 'CONFLICT') {
+          await this.recordConflict({
+            ...op,
+            canonicalRevision: res.canonicalRevision,
+            status: 'needs_you',
+          })
+        }
       }
     }
     // 재생 성공/실패 후 큐 초기화 (실패분은 conflicts 로 이동). 성공분은 op ledger 로.

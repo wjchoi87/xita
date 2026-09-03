@@ -127,19 +127,23 @@ impl SyncEngine {
         Ok(())
     }
 
-    /// incremental pull: revision > cursor 인 entity 변경만 반환.
+    /// incremental pull: 커서 이후 변경만 반환.
+    ///
+    /// 커서는 전역 워크스페이스 리비전이므로 문서의 `ws_rev`(쓰기 시점 워크스페이스
+    /// 리비전, storage::write_entity 각인)와 비교한다. `ws_rev` 없는 레거시 문서는
+    /// 엔티티 `revision` 으로 폴백(과다 포함은 클라이언트 dedupe 로 무해).
     pub fn pull(&self, req: &SyncPullRequest) -> Result<SyncPullResponse> {
         Self::check_version(req.protocol_version)?;
         let mut changes = Vec::new();
         for ty in ALL_TYPES {
             for id in self.ws.list_ids(ty)? {
                 let doc = self.ws.read_entity(ty, &id)?;
-                let rev = doc_revision(&doc);
-                if rev > req.cursor.get() {
+                let change_rev = doc_ws_rev(&doc).unwrap_or_else(|| doc_revision(&doc));
+                if change_rev > req.cursor.get() {
                     changes.push(EntityChange {
                         target: ty,
                         target_id: id,
-                        revision: rev,
+                        revision: doc_revision(&doc),
                         fields: doc.fields,
                         body: doc.body,
                     });
@@ -205,7 +209,16 @@ fn doc_revision(doc: &Doc) -> u64 {
         .unwrap_or(0) as u64
 }
 
-const ALL_TYPES: [EntityType; 14] = [
+/// 쓰기 시점에 각인된 워크스페이스 리비전 (storage::write_entity).
+fn doc_ws_rev(doc: &Doc) -> Option<u64> {
+    doc.fields
+        .iter()
+        .find(|(k, _)| k == "ws_rev")
+        .and_then(|(_, v)| v.as_int())
+        .map(|n| n as u64)
+}
+
+const ALL_TYPES: [EntityType; 15] = [
     EntityType::Product,
     EntityType::Change,
     EntityType::Decision,
@@ -218,6 +231,7 @@ const ALL_TYPES: [EntityType; 14] = [
     EntityType::Review,
     EntityType::Reference,
     EntityType::Dispatch,
+    EntityType::Patch,
     EntityType::Milestone,
     EntityType::Insight,
 ];
@@ -269,6 +283,27 @@ mod tests {
         // cursor == 현재 revision → 변경 없음
         let r2 = engine.pull(&SyncPullRequest { protocol_version: 1, cursor: SyncCursor(r1.workspace_revision) }).unwrap();
         assert_eq!(r2.changes.len(), 0);
+    }
+
+    /// 회귀(§14 커서 결함): 커서=워크스페이스 리비전, 문서 비교는 ws_rev.
+    /// 두 번째 문서 생성 후 커서 1 로 pull 하면 반드시 두 번째 문서가 와야 한다.
+    #[test]
+    fn pull_returns_later_docs_after_cursor_advanced() {
+        let ws = ws();
+        let op_engine = OperationEngine::new(ws.clone());
+        op_engine.apply(&sync_op("op-a", "p-a", EntityType::Product, 0)).unwrap();
+        // 클라이언트가 첫 문서만 본 상태(커서 1)
+        let c1 = SyncEngine::new(ws.clone())
+            .pull(&SyncPullRequest { protocol_version: 1, cursor: SyncCursor(1) })
+            .unwrap();
+        assert_eq!(c1.changes.len(), 0, "cursor 1 이면 아직 새 문서 없음");
+
+        op_engine.apply(&sync_op("op-b", "p-b", EntityType::Product, 0)).unwrap();
+        let c2 = SyncEngine::new(ws.clone())
+            .pull(&SyncPullRequest { protocol_version: 1, cursor: SyncCursor(1) })
+            .unwrap();
+        assert_eq!(c2.changes.len(), 1, "두 번째 문서는 커서 1 이후 변경이므로 와야 한다");
+        assert_eq!(c2.changes[0].target_id, "p-b");
     }
 
     #[test]

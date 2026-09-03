@@ -1,5 +1,6 @@
 import { MarkdownStore } from '#v4/markdown_store'
 import { loadWorkspaceMeta, type DocType } from '#v4/workspace'
+import { isValidTransition } from '#v4/domain'
 
 /*
  * Revision Engine (v0.4 §11, §12, §18-S6).
@@ -30,6 +31,7 @@ export interface Operation {
 export type OperationResult =
   | { status: 'APPLIED'; entityRevision: number; workspaceRevision: number; doc?: unknown }
   | { status: 'CONFLICT'; reason: ConflictReason; message: string; canonicalRevision: number }
+  | { status: 'REJECTED'; message: string; canonicalRevision: number }
 
 /**
  * 일반적으로 오버랩 위험이 낮은 메타 필드 (안전 자동 적용 후보, v0.4 §12).
@@ -80,6 +82,19 @@ export class RevisionEngine {
           reason: 'SEMANTIC_CONFLICT',
           message: `Stale revision ${op.base_revision} vs canonical ${canonicalRev} on ${op.target_id}`,
           canonicalRevision: canonicalRev,
+        }
+      }
+      // Lifecycle guard (§13/§78 — Rust operation.rs와 동일 규칙): Change 의 status 는
+      // op type(update_field 포함) 불문 전이 표로 검증한다. 우회 차단(2026-09 감사).
+      if (op.target_type === 'change' && op.payload && 'status' in op.payload) {
+        const from = String((existing.meta as Record<string, unknown>).status ?? 'IDEA')
+        const to = String(op.payload.status ?? '')
+        if (!isValidTransition(from, to)) {
+          return {
+            status: 'REJECTED',
+            message: `invalid transition ${from} -> ${to}`,
+            canonicalRevision: canonicalRev,
+          }
         }
       }
       // base_revision 일치 → 적용
