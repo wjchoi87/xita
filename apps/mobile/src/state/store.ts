@@ -17,6 +17,7 @@ export interface StoreState {
   phase: 'loading' | 'unpaired' | 'ready'
   host: string | null
   items: UiItem[]
+  proposals: CanonicalDoc[]
   workspaceRevision: number
   needsYou: number
   activeChanges: number
@@ -31,6 +32,7 @@ const initial: StoreState = {
   phase: 'loading',
   host: null,
   items: [],
+  proposals: [],
   workspaceRevision: 0,
   needsYou: 0,
   activeChanges: 0,
@@ -41,8 +43,9 @@ const initial: StoreState = {
   lastError: null,
 }
 
-const ACTIVE = new Set(['IDEA', 'PLAN', 'BUILD', 'REVIEW', 'SHIP_READY', 'idea', 'plan', 'build', 'review', 'ship_ready'])
-const NEEDS_REVIEW = new Set(['REVIEW', 'SHIP_READY', 'review', 'ship_ready'])
+/** 상태 비교는 대문자 정규화 한 곳에서 (데이터 정규화 부재 증상 제거). */
+const ACTIVE = new Set(['IDEA', 'PLAN', 'BUILD', 'REVIEW', 'SHIP_READY'])
+const NEEDS_REVIEW = new Set(['REVIEW', 'SHIP_READY'])
 
 class Store {
   private listeners = new Set<() => void>()
@@ -52,6 +55,7 @@ class Store {
   private deviceId = newDeviceId()
   private docs: CanonicalDoc[] = []
   private cursor = 0
+  private snoozed: Record<string, string> = {}
   private sse: SSEHandle | null = null
   private sseDebounce: ReturnType<typeof setTimeout> | null = null
 
@@ -79,6 +83,7 @@ class Store {
 
       this.docs = await storage.getDocs()
       this.cursor = await storage.getCursor()
+      this.snoozed = await storage.getSnoozed()
       await this.queue.load()
 
       if (host) {
@@ -160,9 +165,33 @@ class Store {
     if (ops.length === 0) return
     try {
       const out = await c.push(ops)
-      const done = out.results.filter((r) => r.status === 'APPLIED' || r.status === 'DEDUPED').map((_, i) => ops[i]?.op_id).filter(Boolean) as string[]
+      // results 는 ops 와 1:1 순서 대응 — 원래 인덱스로만 제거한다 (필터 후 인덱스 재사용 금지).
+      // APPLIED/DEDUPED 는 완료, REJECTED 는 영구 거부(재시도 무의미)라 큐에서 내리고 안내,
+      // CONFLICT 는 서버 conflicts.jsonl 에 남고 needs-you 로 표면화되므로 큐에서만 내린다.
+      const done: string[] = []
+      let rejectedMsg: string | null = null
+      out.results.forEach((r, i) => {
+        const id = ops[i]?.op_id
+        if (!id) return
+        if (r.status === 'APPLIED' || r.status === 'DEDUPED') done.push(id)
+        else if (r.status === 'REJECTED') rejectedMsg = r.message ?? '거부된 요청이 있습니다.'
+      })
       await this.queue.removeApplied(done)
-      this.set({ conflicts: out.conflicts ?? [] })
+      this.set({ conflicts: out.conflicts ?? [], lastError: rejectedMsg })
+      await this.refresh()
+      this.recompute()
+    } catch (e) {
+      this.recompute({ online: false, lastError: String(e) })
+    }
+  }
+
+  /** 충돌 정리 — "Mac 버전 유지"(정본 유지). 서버 conflicts.jsonl 에서만 내린다(§12). */
+  async clearConflict(opId: string) {
+    const c = this.client
+    if (!c) return
+    try {
+      await c.raw('/sync/conflicts/clear', { method: 'POST', body: JSON.stringify({ op_id: opId }) })
+      this.set({ conflicts: this.state.conflicts.filter((x) => x.op_id !== opId) })
       await this.refresh()
       this.recompute()
     } catch (e) {
@@ -218,12 +247,46 @@ class Store {
     await this.enqueue(op)
   }
 
-  /** Needs You — pending proposals (§49/§81; 모바일 Approve/Reject). */
+  /** Needs You — 대기 중 제안 (§49/§81). 미루기(내일) 중인 것은 오늘 결정 대상이 아니다. */
   get pendingProposals() {
-    return this.docs.filter((d) => d.type === 'proposal' && String(d.meta?.status ?? '') === 'pending')
+    return this.docs.filter(
+      (d) => d.type === 'proposal' && String(d.meta?.status ?? '') === 'pending' && !this.isSnoozed(d.id)
+    )
   }
 
+  private isSnoozed(id: string): boolean {
+    const until = this.snoozed[id]
+    if (!until) return false
+    return until >= new Date().toISOString().slice(0, 10)
+  }
+
+  /** 결정 미루기(내일로) — 로컬 선호. 서버 상태는 건드리지 않는다. */
+  async snoozeProposal(proposalId: string) {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    this.snoozed = { ...this.snoozed, [proposalId]: tomorrow.toISOString().slice(0, 10) }
+    await storage.setSnoozed(this.snoozed)
+    this.recompute()
+  }
+
+  /**
+   * 제안 승인/거절 — 온라인이면 서버 REST(/v4/proposals/:id/resolve, §81)를 써서
+   * PROPOSAL_RESOLVED 자취 이벤트까지 남긴다. 오프라인이면 op 큐로 우회(§9)해 유실 없이.
+   */
   async resolveProposal(proposalId: string, status: 'approved' | 'rejected' | 'modified') {
+    const c = this.client
+    if (c) {
+      try {
+        await c.raw(`/v4/proposals/${encodeURIComponent(proposalId)}/resolve`, {
+          method: 'POST',
+          body: JSON.stringify({ status }),
+        })
+        await this.refresh()
+        this.recompute()
+        return
+      } catch {
+        /* 네트워크 실패 — 아래 op 큐 경유 (§10 오프라인) */
+      }
+    }
     const doc = this.docs.find((d) => d.type === 'proposal' && d.id === proposalId)
     const op: Operation = {
       op_id: newOpId(),
@@ -268,12 +331,14 @@ class Store {
 
   private recompute(extra: Partial<StoreState> = {}) {
     const items: UiItem[] = SyncClient.projectDocs(this.docs)
+    const upper = (s: string) => s.toUpperCase()
     const needsYou =
-      items.filter((i) => i.type === 'change' && NEEDS_REVIEW.has(i.status)).length +
+      items.filter((i) => i.type === 'change' && NEEDS_REVIEW.has(upper(i.status))).length +
       this.state.conflicts.length
-    const activeChanges = items.filter((i) => i.type === 'change' && ACTIVE.has(i.status)).length
+    const activeChanges = items.filter((i) => i.type === 'change' && ACTIVE.has(upper(i.status))).length
     this.set({
       items,
+      proposals: this.pendingProposals,
       workspaceRevision: this.cursor,
       needsYou,
       activeChanges,

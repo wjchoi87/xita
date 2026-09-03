@@ -102,7 +102,7 @@ export class SyncClient {
     return this.request<PushResponse>('/sync/push', { method: 'POST', body: JSON.stringify({ ops }) })
   }
 
-  /** PC offline 검사용 헬스. offline 이면 false. */
+  /** PC offline 검사용 헬스 — 페어링 전 호스트 확인 등. offline 이면 false. */
   async isHostReachable(): Promise<boolean> {
     try {
       await this.request<{ workspace_revision: number }>('/sync/status', { method: 'GET' })
@@ -116,10 +116,6 @@ export class SyncClient {
     return this.request('/sync/reconcile', { method: 'POST', body: JSON.stringify({}) })
   }
 
-  async pendingCount(): Promise<{ pending: number }> {
-    return this.request('/sync/pending', { method: 'GET' })
-  }
-
   // ---- storage helper (캐시 레이어와 분리된 순수 변환) --------------------
   static projectDocs(docs: CanonicalDoc[]) {
     return docs
@@ -129,6 +125,7 @@ export class SyncClient {
         revision: d.revision ?? 0,
         name: (d.meta?.name as string | undefined) ?? d.id,
         status: (d.meta?.status as string | undefined) ?? '-',
+        product: (d.meta?.product as string | undefined) ?? '',
       }))
       .sort((a, b) => (a.type === b.type ? a.id.localeCompare(b.id) : a.type.localeCompare(b.type)))
   }

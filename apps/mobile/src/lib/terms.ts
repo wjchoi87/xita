@@ -25,9 +25,22 @@ const STATUS_KO: Record<string, string> = {
   pending: '대기',
   approved: '승인됨',
   rejected: '거절됨',
+  active: '진행',
+  paused: '보류',
+}
+/** 상태 전이 버튼 = 동사형 (상태 어휘와 티어 분리 — Status Vocabulary by Tier). */
+const ACTION_KO: Record<string, string> = {
+  PLAN: '계획으로',
+  BUILD: '만들기',
+  REVIEW: '검토 요청',
+  SHIP_READY: '검토 통과',
+  SHIPPED: '출시',
 }
 export function term(k: string): string {
   return TERM[k] ?? k
+}
+export function actionKo(s: string): string {
+  return ACTION_KO[s.toUpperCase()] ?? statusKo(s)
 }
 export function statusKo(s?: string): string {
   if (!s) return '-'

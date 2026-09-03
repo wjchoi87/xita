@@ -15,9 +15,9 @@ export default function RootLayout() {
     <>
       <StatusBar style="auto" />
       <Tabs>
-        <Tabs.Screen name="index" options={{ title: 'Home' }} />
-        <Tabs.Screen name="capture" options={{ title: 'Capture' }} />
-        <Tabs.Screen name="products" options={{ title: 'Products' }} />
+        <Tabs.Screen name="index" options={{ title: '홈' }} />
+        <Tabs.Screen name="capture" options={{ title: '메모' }} />
+        <Tabs.Screen name="products" options={{ title: '제품' }} />
       </Tabs>
     </>
   )

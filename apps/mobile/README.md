@@ -27,7 +27,7 @@ pnpm install          # (이미 저장소 루트에서 설치됨)
 pnpm start            # Expo → iOS/Android 개발 빌드 또는 Expo Go
 
 # 3. 앱 첫 화면: 호스트 주소 + macOS 페어링 코드 입력
-#    코드 발급: curl -X POST http://localhost:3333/api/v1/devices/pair
+#    코드 발급: pnpm xita pair   (10분 유효 — 만료 시 재실행)
 #    → {"data":{"code":"XXXXXXXX", ...}}
 ```
 - 실기기에서는 `XITA_WS` 대신 앱에 LAN IP(host: `http://<mac-ip>:3333`) 입력

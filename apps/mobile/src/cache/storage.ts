@@ -12,6 +12,7 @@ const K = {
   docs: 'xita.cache.docs',
   cursor: 'xita.cache.cursor',
   ops: 'xita.cache.pending_ops',
+  snooze: 'xita.cache.snoozed_proposals',
   host: 'xita.settings.host',
   deviceId: 'xita.settings.device_id',
   token: 'xita.settings.token',
@@ -49,6 +50,13 @@ export const storage = {
   },
   async setOps(ops: Operation[]) {
     await writeJson(K.ops, ops)
+  },
+  /** 미루기(내일) — proposalId → 깨어날 날짜(YYYY-MM-DD). 로컬 선호일 뿐 canonical 이 아니다. */
+  async getSnoozed(): Promise<Record<string, string>> {
+    return (await readJson<Record<string, string>>(K.snooze)) ?? {}
+  },
+  async setSnoozed(map: Record<string, string>) {
+    await writeJson(K.snooze, map)
   },
   async getHost(): Promise<string | null> {
     return (await readJson<string>(K.host)) ?? null

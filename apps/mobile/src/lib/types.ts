@@ -78,4 +78,6 @@ export interface UiItem {
   revision: number
   name: string
   status: string
+  /** 귀속 제품 id (change/workbench 등 — canonical meta.product). */
+  product: string
 }

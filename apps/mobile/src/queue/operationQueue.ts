@@ -38,10 +38,4 @@ export class OperationQueue {
     this.ops = this.ops.filter((o) => !removed.has(o.op_id))
     await storage.setOps(this.ops)
   }
-
-  /** 오프라인 중 여부와 무관하게 큐 내용 그대로. */
-  async flushable(): Promise<Operation[]> {
-    if (!this.loaded) await this.load()
-    return this.all()
-  }
 }
