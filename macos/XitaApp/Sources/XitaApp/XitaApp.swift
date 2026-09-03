@@ -35,6 +35,82 @@ struct XitaApp: App {
         }
         .defaultPosition(.center)
         .windowResizability(.contentMinSize)
+
+        /* MenuBarExtra — 네이티브 capability(Q13): 앱을 열지 않고도 "나를 기다리는 것"이 보이고
+         * 메모를 즉시 담는다(Drafts cold-open 정신). Needs You 0 이면 조용히 회색 아이콘. */
+        MenuBarExtra {
+            MenuBarContent(model: model)
+        } label: {
+            Image(systemName: model.needsYouCount > 0 ? "bell.badge.fill" : "bell")
+        }
+        .menuBarExtraStyle(.window)
+    }
+}
+
+/// 메뉴바 콘텐츠 — 결정 대기 요약 + 3초 캡처 + 앱 열기
+struct MenuBarContent: View {
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject var model: AppModel
+    @State private var memo = ""
+    @State private var saved = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("내가 결정할 일").font(.headline)
+                Spacer()
+                Text("\(model.needsYouCount)건")
+                    .font(.callout.monospaced().bold())
+                    .foregroundStyle(model.needsYouCount > 0 ? Color.orange : Color.secondary)
+            }
+            if model.waitingDispatches.isEmpty && model.conflicts.isEmpty && model.pendingProposals.isEmpty {
+                Text("없음 — 괜찮습니다").font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(model.waitingDispatches.prefix(3)) { d in
+                Label(d.name, systemImage: "bubble.exclamation")
+                    .font(.caption)
+                    .foregroundStyle(d.status.uppercased() == "AWAITING_INPUT" ? Color.red : Color.orange)
+            }
+            ForEach(model.pendingProposals.prefix(3)) { pr in
+                Label(pr.name, systemImage: "arrow.triangle.turn.up.right.diamond")
+                    .font(.caption)
+                    .foregroundStyle(.purple)
+            }
+            ForEach(model.conflicts.prefix(3)) { c in
+                Label(model.item("changes", c.targetId)?.name ?? c.targetId, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            Divider()
+            TextField("메모 한 줄 — ⏰ Enter 로 담기", text: $memo)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    let t = memo.trimmingCharacters(in: .whitespaces)
+                    guard !t.isEmpty else { return }
+                    do {
+                        try model.capture(title: t, content: "")
+                        memo = ""
+                        saved = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { saved = false }
+                    } catch {
+                        model.lastError = "메모를 담지 못했습니다 — \(error)"
+                    }
+                }
+            if saved { Text("담았습니다 — 호스트 정본에 기록됩니다").font(.caption2).foregroundStyle(.green) }
+            if let err = model.lastError {
+                Text(err).font(.caption2).foregroundStyle(.red).lineLimit(2)
+            }
+
+            Divider()
+            Button("XITA 열기") {
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "main")
+            }
+        }
+        .padding(12)
+        .frame(width: 280)
+        .onAppear { try? model.refresh() }
     }
 }
 

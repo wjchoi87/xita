@@ -124,9 +124,11 @@ enum XUI {
         }
     }
 
-    static let pad: CGFloat = 16
-    static let gap: CGFloat = 12
-    static let cardRadius: CGFloat = 12
+    /// 토큰 원천 — §42 기록(8pt 그리드: pad 12 · gap 10, 카드 radius 10)과 동일하게 고정.
+    /// 개별 뷰가 이 값들을 우회해 하드코딩하지 않도록 한다(2026-09 감사 P3).
+    static let pad: CGFloat = 12
+    static let gap: CGFloat = 10
+    static let cardRadius: CGFloat = 10
     static let chipRadius: CGFloat = 6
 
     static func card<Content: View>(_ content: () -> Content) -> some View {
@@ -146,11 +148,11 @@ enum XUI {
 
     static func statusColor(_ status: String) -> Color {
         switch status.uppercased() {
-        case "SHIPPED", "DONE", "APPLIED", "APPROVED", "ACTIVE": return .green
-        case "REVIEW", "SHIP_READY", "PENDING", "SUBMITTED", "PREPARING": return .orange
-        case "BUILD": return .blue
+        case "SHIPPED", "DONE", "APPLIED", "APPROVED", "ACTIVE", "MERGED": return .green
+        case "REVIEW", "SHIP_READY", "PENDING", "SUBMITTED", "PREPARING", "RESULT_READY": return .orange
+        case "BUILD", "WORKING": return .blue
         case "PLAN", "READY": return .purple
-        case "BLOCKED", "CONFLICT", "CRITICAL": return .red
+        case "BLOCKED", "CONFLICT", "CRITICAL", "AWAITING_INPUT", "FAILED": return .red
         case "CANCELLED", "ROLLED_BACK", "SUPERSEDED", "REJECTED", "ARCHIVED", "DISMISSED": return .gray
         default: return Color(nsColor: .secondaryLabelColor)
         }

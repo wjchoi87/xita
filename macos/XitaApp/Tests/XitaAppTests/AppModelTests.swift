@@ -55,6 +55,33 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.changes(for: "novel").count, 1)
     }
 
+    /// 회귀(2026-09 감사 Critical 3): 제품이 달라도 같은 제목이면 id 충돌로 덮어써/충돌나던 결함.
+    /// 이제 unique-suffix 로 두 제품에 같은 제목의 할 일이 공존한다.
+    func testSameTitleAcrossProductsGetsUniqueIds() throws {
+        let model = AppModel(workspaceDir: dir)
+        try model.bootstrapDemo()
+        try model.createProduct(name: "CarBook")
+        let id1 = try model.createChange(productId: "novel", title: "Payment Migration")
+        let id2 = try model.createChange(productId: "carbook", title: "Payment Migration")
+        XCTAssertNotEqual(id1, id2, "같은 제목이라도 제품이 다르면 id 가 겹치면 안 된다")
+        XCTAssertEqual(model.changes(for: "novel").filter { $0.name == "Payment Migration" }.count, 1)
+        XCTAssertEqual(model.changes(for: "carbook").filter { $0.name == "Payment Migration" }.count, 1)
+    }
+
+    /// 회귀(2026-09 감사 Critical 1): capabilities(for:) 가 active 만 돌려
+    /// 준비/실험/중단 레인이 영원히 비고, 탭 사이클 시 항목이 사라지던 결함.
+    func testCapabilitiesReturnsAllStatusesForLanes() throws {
+        let model = AppModel(workspaceDir: dir)
+        try model.bootstrapDemo()
+        try model.addCapability(productId: "novel", name: "Billing")
+        let id = "novel-billing"
+        XCTAssertEqual(model.capabilities(for: "novel").count, 1)
+        // active → shipped 로 사이클해도 목록에서 사라지지 않아야 한다
+        try model.cycleCapability(productId: "novel", name: "Billing")
+        XCTAssertEqual(model.capabilities(for: "novel").count, 1, "상태 변경 후에도 되는 것 목록에 남는다")
+        XCTAssertEqual(model.item("capabilities", id)?.status, "shipped")
+    }
+
     func testProductEditAndDelete() throws {
         let model = AppModel(workspaceDir: dir)
         try model.bootstrapDemo()
@@ -422,9 +449,15 @@ final class AppModelTests: XCTestCase {
 
     func testUserVisibleStringsHaveNoDevJargon() throws {
         // 제도화(2026-08-30 오너 감사): 화면 라벨에 사양번호 § 와 파일경로 .xita 노출 금지(주석은 허용)
-        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/XitaApp/ContentView.swift").path
-        let src = try String(contentsOfFile: path, encoding: .utf8)
+        // 2026-09: ContentView 분해 후 — 화면 소스 전체(Sources/XitaApp/**.swift)를 스캔 대상으로
+        let srcRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/XitaApp")
+        let files = try FileManager.default.subpathsOfDirectory(atPath: srcRoot.path).filter { $0.hasSuffix(".swift") }
+        var sources: [String] = []
+        for f in files {
+            sources.append(try String(contentsOfFile: srcRoot.appendingPathComponent(f).path, encoding: .utf8))
+        }
+        let src = sources.joined(separator: "\n")
         let markers = ["XCard(", "Text(", "Label(", "Section("]
         var checked = 0
         for raw in src.split(separator: "\n") {

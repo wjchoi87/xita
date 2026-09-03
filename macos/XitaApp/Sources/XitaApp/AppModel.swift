@@ -243,11 +243,11 @@ public final class AppModel: ObservableObject {
     public func summaryText(days: Int = 90) -> String {
         let evs = eventLog(limit: 500)
         let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
-        let recent = evs.filter { (ts, _, _) in
-            guard let d = ISO8601DateFormatter().date(from: ts) else { return true }
+        let recent = evs.filter { (ev, _, _, _) in
+            guard let d = ISO8601DateFormatter().date(from: ev) else { return true }
             return d >= cutoff
         }
-        func n(_ t: String) -> Int { recent.filter { $0.type == t }.count }
+        func n(_ t: String) -> Int { recent.filter { $0.1 == t }.count }
         return "최근 \(days)일 — 완료한 할 일 \(n("CHANGE_APPROVED") + n("CHANGE_SHIPPED"))건 · 출시 \(n("RELEASED"))건 · 새 결정 \(n("MAJOR_DECISION"))건 · 제안 \(n("PROPOSAL_CREATED"))건 · 차단 \(n("SHIP_BLOCKER"))건 · 이벤트 \(recent.count)건"
     }
 
@@ -376,15 +376,7 @@ public final class AppModel: ObservableObject {
                 KV("status", "PLANNED"), KV("notes", notes),
             ]
         )
-        _ = try? timelineNote("Release \(name) 계획")
     }
-
-    private var timelineOffset: Int = 0
-    private func timelineNote(_ title: String) throws {
-        timelineLocal.append(Date().description)
-        _ = title
-    }
-    public var timelineLocal: [String] = []
 
     public func releaseChangeIds(_ releaseId: String) -> [String] {
         let raw = doc(type: "release", id: releaseId)?.fields["change_ids"] ?? ""
@@ -561,11 +553,28 @@ public final class AppModel: ObservableObject {
 
     // ---- Changes ------------------------------------------------------------
 
-    public func createChange(productId: String, title: String, intent: String? = nil, goal: String? = nil) throws {
+    /// change id = 제품 독립 slug → 서로 다른 제품의 같은 제목이 같은 id 로 충돌하는 결함 수정.
+    /// 서버 도메인(domain.ts createChange)과 동일한 unique-suffix 규칙(-2, -3…)을 쓴다.
+    func uniqueChangeId(productId: String, title: String) -> String {
+        let base = slug(title)
+        var candidate = base
+        var n = 2
+        while item("changes", candidate) != nil || doc(type: "change", id: candidate) != nil {
+            candidate = "\(base)-\(n)"
+            n += 1
+        }
+        return candidate
+    }
+
+    /// 생성된 change id 를 돌려준다(퀵애드의 즉시 마일스톤 상속용).
+    @discardableResult
+    public func createChange(productId: String, title: String, intent: String? = nil, goal: String? = nil) throws -> String {
         var fields: [KV] = [KV("product", productId), KV("status", "IDEA"), KV("name", title)]
         if let intent, !intent.isEmpty { fields.append(KV("intent", intent)) }
         if let goal, !goal.isEmpty { fields.append(KV("goal", goal)) }
-        _ = try applyMulti(target: "change", targetId: slug(title), baseRevision: 0, kind: "create", fields: fields)
+        let id = uniqueChangeId(productId: productId, title: title)
+        _ = try applyMulti(target: "change", targetId: id, baseRevision: 0, kind: "create", fields: fields)
+        return id
     }
 
     public func updateChange(id: String, fields: [KV]) throws {
@@ -695,8 +704,11 @@ public final class AppModel: ObservableObject {
 
     // ---- Capabilities / Proposals / Reviews (pull 기반 필터) ----------------
 
+    /// "되는 것" 4레인(되는중/준비/실험/중단)이 실제로 채워지려면 전체를 돌려준다 —
+    /// active 만 반환하던 결함은 준비/실험/중단 레인이 영원히 비는 버그였고,
+    /// 탭 사이클로 상태를 바꾸면 항목이 화면에서 사라졌다(2026-09 감사).
     public func capabilities(for productId: String) -> [Item] {
-        items.filter { $0.type == "capabilities" && $0.product == productId && $0.status == "active" }
+        items.filter { $0.type == "capabilities" && $0.product == productId }
     }
 
     public func addCapability(productId: String, name: String) throws {
@@ -718,6 +730,12 @@ public final class AppModel: ObservableObject {
     }
 
     public var pendingProposals: [Item] { items.filter { $0.type == "proposals" && $0.status == "pending" } }
+
+    /// 기각은 이력으로 남는다 ("왜 안 했나"의 원천 — UX_PATTERN_LIBRARY Rejected Stays Visible)
+    public var rejectedProposals: [Item] {
+        items.filter { $0.type == "proposals" && $0.status == "rejected" }
+            .sorted { $0.revision > $1.revision }
+    }
 
     public func proposals(for changeId: String) -> [Item] {
         items.filter { $0.type == "proposals" && $0.id.hasPrefix("\(changeId)-") }
@@ -839,10 +857,10 @@ public final class AppModel: ObservableObject {
     }
 
     /// Mac 워크스페이스 events.jsonl (server ops가 쓴 것 동일 포맷)
-    public func eventLog(limit: Int = 40) -> [(ts: String, type: String, title: String)] {
+    public func eventLog(limit: Int = 40) -> [(ts: String, type: String, title: String, product: String)] {
         let path = (workspaceDir as NSString).appendingPathComponent(".xita/events.jsonl")
         guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
-        let lines = raw.split(separator: "\n").compactMap { line -> (String, String, String)? in
+        let lines = raw.split(separator: "\n").compactMap { line -> (String, String, String, String)? in
             guard let data = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
             /* events.jsonl 키 혼재 대응(TS=eventType / Rust=event_type) — 읽기측 양쪽 수용
@@ -850,7 +868,8 @@ public final class AppModel: ObservableObject {
             return (
                 String(obj["ts"] as? String ?? ""),
                 String(obj["event_type"] as? String ?? obj["eventType"] as? String ?? ""),
-                String(obj["title"] as? String ?? "")
+                String(obj["title"] as? String ?? ""),
+                String(obj["product"] as? String ?? "")
             )
         }
         return Array(lines.suffix(limit).reversed())
