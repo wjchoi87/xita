@@ -94,6 +94,89 @@ const TOOLS = [
     },
   },
   {
+    name: 'xita_projects',
+    description: '포트폴리오 전체 프로젝트(여러 앱 저장소) 목록: id·이름·상태·종류·로컬 버전·스토어 트랙 버전·출시 대기·저장소 경로. 어떤 프로젝트에서 작업할지 정할 때 먼저 호출.',
+    inputSchema: { type: 'object', properties: {} },
+    run: async () => {
+      const list = await api('/portfolio/projects')
+      if (!list.length) return '등록된 프로젝트 없음'
+      return list
+        .map((p) => {
+          const ver = p.versionName ? ` v${p.versionName}(${p.versionCode})` : ''
+          const store = p.store ? ` store{${Object.entries(p.store).map(([t, v]) => `${t}:${v}`).join(',')}}` : ''
+          return `- ${p.id} "${p.name}" [${p.status ?? '-'}/${p.kind}]${ver}${store}${p.pendingRelease ? ' PENDING_RELEASE' : ''} path=${p.path}`
+        })
+        .join('\n')
+    },
+  },
+  {
+    name: 'xita_project',
+    description: '프로젝트 1개 상세: 경로·빌드/실행 명령·진행 중 할 일·최근 자취(배포·메모 등 일대기). 읽기 전용 — 배포/실행은 사람이 XITA 콘솔에서 한다.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    run: async (a) => {
+      const d = await api(`/portfolio/projects/${encodeURIComponent(a.id)}`)
+      const p = d.project
+      return [
+        `${p.name} (${p.codename}) [${p.status ?? '-'}] ${p.monetization ?? ''}`,
+        `path: ${p.path} kind=${p.kind}${p.versionName ? ` v${p.versionName}(${p.versionCode})` : ''}`,
+        `commands: ${d.commands.map((c) => `${c.name}=\`${c.cmd}\``).join(', ') || '-'}`,
+        `changes: ${d.changes.map((c) => `${c.id}[${c.status}]`).join(', ') || '-'}`,
+        '-- recent --',
+        ...d.timeline.slice(0, 10).map((e) => `· ${String(e.ts).slice(0, 10)} ${e.title}`),
+      ].join('\n')
+    },
+  },
+  {
+    name: 'xita_work',
+    description: '프로젝트 작업 보드: 아이디어·할 일·진행 중·검토 항목과 마일스톤 진행률. 무엇을 할지 고르기 전에 호출.',
+    inputSchema: { type: 'object', properties: { project: { type: 'string' } }, required: ['project'] },
+    run: async (a) => {
+      const w = await api(`/v4/products/${encodeURIComponent(a.project)}/work`)
+      return [
+        ...w.milestones.map((m) => `◆ ${m.name} ${m.progress}% (${m.done}/${m.total})${m.target_date ? ` due ${m.target_date}${m.overdue ? ' OVERDUE' : ''}` : ''} id=${m.id}`),
+        ...w.changes
+          .filter((c) => !['SHIPPED', 'CANCELLED'].includes(c.status))
+          .map((c) => `- [${c.status}] ${c.name}${c.priority !== 'normal' ? ` (${c.priority})` : ''}${c.milestone ? ` ms=${c.milestone}` : ''} id=${c.id}${c.note ? `\n    ${c.note.split('\n')[0]}` : ''}`),
+      ].join('\n') || '비어 있음'
+    },
+  },
+  {
+    name: 'xita_work_add',
+    description: '작업 중 발견한 아이디어·버그·할 일을 프로젝트 보드에 남긴다 (status: IDEA 기본, PLAN=할 일). 사람이 나중에 고른다 — 남발 금지, 1~2줄.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string' },
+        title: { type: 'string' },
+        note: { type: 'string', description: '왜 필요한지 한 줄' },
+        status: { type: 'string', enum: ['IDEA', 'PLAN'] },
+      },
+      required: ['project', 'title'],
+    },
+    run: async (a) => {
+      const d = await api(`/v4/products/${encodeURIComponent(a.project)}/changes`, {
+        title: a.title,
+        status: a.status === 'PLAN' ? 'PLAN' : 'IDEA',
+        ...(a.note ? { note: a.note } : {}),
+      })
+      return `added ${d.id} [${a.status === 'PLAN' ? 'PLAN' : 'IDEA'}]`
+    },
+  },
+  {
+    name: 'xita_advice',
+    description: '상시 모니터링 최신 결과: 수익·출시·작업 신호와 우선순위 조언. 포트폴리오 차원의 우선순위를 판단할 때 참고 (읽기 전용).',
+    inputSchema: { type: 'object', properties: {} },
+    run: async () => {
+      const r = await api('/portfolio/monitor')
+      const rep = r.report
+      if (!rep) return '아직 점검 결과 없음'
+      return [
+        `${rep.at} source=${rep.source} revenue7d=$${(rep.revenue?.total7d ?? 0).toFixed(2)}`,
+        ...rep.advice.map((x) => `[${x.impact}] ${x.title}${x.project ? ` (${x.project})` : ''} — ${x.action}`),
+      ].join('\n')
+    },
+  },
+  {
     name: 'xita_agent_update',
     description: '위임(dispatch) 진행 상태 보고: WORKING / AWAITING_INPUT(사람 질문 발생) / RESULT_READY(리뷰 대기) / MERGED / FAILED. 노트 1줄 권장.',
     inputSchema: {

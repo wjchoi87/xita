@@ -3,6 +3,7 @@ import { SyncService } from '#v4/sync'
 import { DeviceRegistry } from '#v4/devices'
 import { ArtifactStore, createDecision, createRelease } from '#v4/artifact_store'
 import vine from '@vinejs/vine'
+import { isLocalRequest } from '#portfolio/local_request'
 
 const syncService = new SyncService()
 const devices = new DeviceRegistry()
@@ -56,7 +57,17 @@ const pairValidator = vine.compile(
  */
 export default class SyncController {
   // ---- Pairing (§14) -----------------------------------------------------
-  async pair({ request, response }: HttpContext) {
+  /*
+   * 변경 전 정책: 페어링 코드 발급(POST /devices/pair)이 무인증 — 같은 LAN 의 누구나 코드를 받아
+   *   곧바로 /sync/pair 로 기기 토큰을 얻을 수 있었다(코드가 사실상 보호 역할을 못 함).
+   * 변경 후 정책: 코드 발급은 호스트 컴퓨터(loopback + localhost Origin)에서만 — 웹 콘솔·CLI 경로.
+   * 변경 이유: 모바일 실기 테스트 중 확인. 모바일 sync 를 위해 서버를 LAN 에 열면 그대로 노출된다.
+   * 영향 범위: 코드 발급만. 코드 입력(/sync/pair)·pull/push 는 그대로.
+   */
+  async pair(ctx: HttpContext) {
+    const { request, response } = ctx
+    if (!isLocalRequest(ctx))
+      return response.forbidden({ message: '페어링 코드는 호스트 컴퓨터에서만 발급할 수 있습니다' })
     const hostIdentity = request.input('host_identity') ?? 'xita-mac'
     const pairing = await devices.pair(hostIdentity)
     return response.created({ data: pairing })

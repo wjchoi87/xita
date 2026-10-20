@@ -16,6 +16,8 @@ macOS(호스트, canonical authority)
 └─ apps/mobile          React Native/Expo — Replica + Operation Producer
                         (AsyncStorage 캐시 + 오프라인 Pending Op Queue, SecureStore 토큰)
 
+apps/server/public/app  웹 콘솔 (/app) — 포트폴리오·배포·기록·문서, 라이트/다크/시스템 테마
+portfolio/              planner 흡수 도구 (deploy.py·스토어 산출물·스캐폴딩·템플릿) → portfolio/README.md
 apps/cli                xita CLI (의존성 0, Agent/Automation 인터페이스)
 apps/cli/xita-mcp.mjs   MCP 서버(stdio) — 코딩 에이전트가 XITA를 도구로 사용
 macos/XitaCoreBridge    Swift↔Rust C ABI bridge (cdylib)
@@ -32,13 +34,40 @@ macos/XitaCoreBridge    Swift↔Rust C ABI bridge (cdylib)
 - **macOS**: Change 선택 → **Agent Handoff(markdown) 생성/복사**, agent 감지(PATH), git branch inspection.
 - **Mobile**: foreground → pull / pending → flush 스케줄러(v0.4 §13 기본 동작, 폴링 기반).
 
+## 포트폴리오 — 모든 프로젝트를 한 곳에서 (planner 흡수)
+
+`~/workspace/auto-money/planner` 의 레지스트리·빌드·딸깍 배포·스토어 버전·광고 ID·애드몹 수익·앱 기록·변경내역·명령 런처를
+XITA 로 흡수했다. 프로젝트 = Product(+`repo_path/codename/portfolio`), 앱 기록 = 제품 일대기(타임라인),
+planner 문서 = Living Artifact(리비전 보존), planner 원문 = `archive/planner/` (sha256 manifest). 설계·API 계약: [docs/PORTFOLIO.md](docs/PORTFOLIO.md)
+
+```bash
+pnpm xita import-planner --dry-run   # 서버 실행 중: 무엇이 들어올지 미리보기
+pnpm xita import-planner             # 흡수 (재실행 안전 — 같은 건 건너뛰고 바뀐 문서는 새 리비전)
+open http://localhost:3333/          # 웹 콘솔 (브라우저는 /app 으로 이동)
+pnpm xita projects | project P | run [P] [명령] | deploy P [--track T] | log P | sync | changelog
+```
+- **컨트롤 타워(2026-10)**: 프로젝트별 작업 보드(아이디어·할 일·마일스톤) · AI 기획 위저드(`xita plan`, 웹 기획) ·
+  홈 '오늘의 조언'(6시간마다 수익·출시·작업 점검 → 로컬 AI 조언) · 수익 일별 기록 · 홍보글 초안·기록(자동 게시 없음) ·
+  AI provider 직접 추가(OpenAI 호환 http / `xal run` 같은 CLI). 상세: docs/PORTFOLIO.md
+  ```bash
+  pnpm xita plan            # AI 가 질문하며 새 프로젝트 기획 (확정 전까지 초안만)
+  pnpm xita work P          # 작업 보드  · xita idea P "…" · xita todo P "…" · xita move ID doing
+  pnpm xita advice [--run]  # 수익 극대화 조언
+  pnpm xita promo draft P geeknews   # 홍보 초안
+  pnpm xita ai              # AI provider·체인·사용량
+  ```
+- 실행 계열 API(빌드·배포·명령·가져오기)는 **이 컴퓨터(loopback) + localhost Origin** 요청만 허용, 프로덕션은 `confirmed` 이중 잠금.
+- 비밀 파일(play-account.json·keystore)은 옮기지 않는다 — 앱 gradle 이 `planner/tools/keystore.properties` 를 참조. 위치는 `XITA_SECRETS_DIR`.
+- 서버 기본 workspace 는 macOS 앱과 같은 `~/.xita-workspace` (이전 기본 `apps/server/.xita-workspace` 는 그대로 남아 있음 — 쓰려면 `XITA_WORKSPACE` 지정).
+
 ## 빠른 실행
 ```bash
-pnpm install
-pnpm v4:init            # canonical workspace 초기화(+데모)
-pnpm dev:server         # http://localhost:3333 (REST + SSE + sync)
+pnpm install            # Node 24 (.node-version) — Node 26 에서는 ace 커맨드 로더가 실패한다
+pnpm v4:init            # 빈 workspace 일 때만 초기화(+데모). 제품이 있으면 아무것도 안 함
+pnpm dev:server         # http://localhost:3333 (웹 콘솔 + REST + SSE + sync)
 pnpm xita status        # CLI (XITA_HOST 로 호스트 지정)
-pnpm xita pair          # 모바일 페어링 코드 발급 — 앱에 입력 (10분 유효)
+pnpm xita pair          # 모바일 페어링 코드 발급 (10분 유효) — 웹 콘솔 설정 → 모바일 연결에서도 발급
+                        # 폰에서 접속하려면 서버를 HOST=0.0.0.0 으로 실행 (코드 발급은 이 컴퓨터에서만 허용)
 pnpm mobile:start       # Expo 앱 (apps/mobile/README — 페어링 코드 입력)
 pnpm rust:test          # Rust core 테스트 (47)
 cd macos/XitaApp && swift run    # macOS GUI (XITA_WS 로 workspace 지정)
@@ -48,8 +77,9 @@ cd macos/XitaApp && swift run    # macOS GUI (XITA_WS 로 workspace 지정)
 | 항목 | 결과 |
 |---|---|
 | `cargo test` (rust/xita-core) | 47 passed · clippy 0 |
-| `swift test` (XitaCoreBridge / XitaApp) | 4 / **41 passed** (capability·readiness·proposal·dispatch 포함) |
+| `swift test` (XitaCoreBridge / XitaApp) | 4 / **50 passed** (포트폴리오 카드·테마 매핑 포함) |
 | server `tsc` + `eslint` | PASS / 0 |
+| server `node ace test` (portfolio 흡수·앱 기록 + 작업 보드·AI 라우터·기획 위저드·모니터링 규칙·sync 리비전 회귀) | 23 passed |
 | mobile `tsc` | PASS |
 | 호스트 스모크 | v4 전체 도메인 CRUD · needs-you(REVIEW+SHIP_BLOCKER) · drift · pair/pull · SSE · AI 분류 · readiness 교차(Rust↔서버) · legacy 404 |
 | 사용자 확인 예정 | Expo 실기기 UI, macOS GUI, LAN 페어링 E2E |

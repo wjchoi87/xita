@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import app from '@adonisjs/core/services/app'
 import { atomicWrite, readText, ensureDir } from '#v4/fs_util'
@@ -55,11 +56,20 @@ export interface WorkspaceMeta {
   last_updated: string | null
 }
 
+/*
+ * 변경 전 정책: XITA_WORKSPACE 미설정 시 서버는 apps/server/.xita-workspace, macOS 앱은
+ *   ~/.xita-workspace 를 썼다 → 같은 PC 에서 정본(canonical)이 둘로 갈라져 서로의 변경이 안 보였다.
+ * 변경 후 정책: 기본값을 macOS 앱과 같은 ~/.xita-workspace 로 통일 (XITA_WORKSPACE 가 있으면 그 값,
+ *   `~/` 확장 지원). 테스트 환경(NODE_ENV=test)은 실데이터 보호를 위해 기존 서버 내부 경로 유지.
+ * 변경 이유: 포트폴리오(여러 프로젝트) 흡수 후 Mac 앱·웹 콘솔·CLI·모바일이 하나의 정본을 봐야 한다.
+ * 영향 범위: env 미설정으로 서버를 띄우던 경우 데이터 위치. 기존 apps/server/.xita-workspace 는
+ *   삭제/이동하지 않는다(필요 시 XITA_WORKSPACE 로 지정해 계속 사용 가능).
+ */
 export function workspaceRoot(): string {
   const configured = process.env.XITA_WORKSPACE
-  if (configured) return configured
-  // 기본: server 루트의 .xita-workspace (실제 macOS 앱은 사용자 폴더로 교체)
-  return path.join(app.makePath(), '.xita-workspace')
+  if (configured) return configured.replace(/^~(?=$|\/)/, os.homedir())
+  if (process.env.NODE_ENV === 'test') return path.join(app.makePath(), '.xita-workspace')
+  return path.join(os.homedir(), '.xita-workspace')
 }
 
 export function metaDir(): string {

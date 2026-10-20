@@ -24,6 +24,9 @@ const ALLOWED: Record<string, string[]> = {
   PAUSED: ['PLAN', 'BUILD', 'CANCELLED'],
   CANCELLED: [],
 }
+export function allowedTransitions(from: string): string[] {
+  return ALLOWED[String(from ?? '').toUpperCase()] ?? []
+}
 /** lifecycle 단일 소스 검증 (Rust lifecycle.rs와 동일 표) — sync push 가드 공용 */
 export function isValidTransition(from: string, to: string): boolean {
   const next = ALLOWED[String(from ?? '').toUpperCase()]
@@ -41,6 +44,11 @@ const STAGE: Record<string, string> = {
 
 function slug(input: string) {
   return slash(input)
+}
+
+/** 고유 접미사 — 같은 밀리초에 여러 개를 만들어도(기획 확정·일괄 추가) 겹치지 않게 */
+export function uniqSuffix() {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
 }
 
 function jd(value: unknown): string {
@@ -83,8 +91,14 @@ export class V4Domain {
     version?: string
     goal?: string | null
     direction?: string | null
+    /** 영문 코드네임 (기획 확정 시). 없으면 이름 slug */
+    id?: string
   }) {
-    const id = slug(input.name)
+    /* 변경 전 정책: id = slug(name) 만. 한글 이름은 'item' 이 되어 두 번째 제품부터 생성 실패.
+     * 변경 후 정책: id(코드네임) 가 주어지면 그 slug. 이름 slug 가 'item' 이면 p-<base36 시각> 고유 id.
+     * 영향 범위: createProduct 호출부(기획 확정·웹·macOS·메모 승격). 영문 이름 동작은 동일. */
+    let id = slug(input.id || input.name)
+    if (id === 'item') id = `p-${uniqSuffix()}`
     if (await this.stores.product.read(id)) {
       throw new Error(`Product already exists: ${id}`)
     }
@@ -94,6 +108,7 @@ export class V4Domain {
       name: input.name,
       status: 'production',
       production_status: input.productionStatus ?? 'PRODUCTION',
+      ...(input.id ? { codename: id } : {}),
       version: input.version ?? null,
       current_goal: input.goal ?? null,
       direction: input.direction ?? null,
@@ -253,8 +268,14 @@ export class V4Domain {
   }) {
     const product = await this.stores.product.read(input.productId)
     if (!product) throw new Error(`Product not found: ${input.productId}`)
-    const id = slug(input.title)
-    if (await this.stores.change.read(id)) throw new Error(`Change already exists: ${id}`)
+    /* 변경 전 정책: id = slug(title). 한글 전용 제목은 slug 가 'item' 이 되어 두 번째부터 "already exists" 로 생성 실패.
+     * 변경 후 정책: slug 가 비거나('item') 이미 있으면 <product>-<slug|c>-<base36 시각> 으로 고유 id.
+     * 변경 이유: 웹/CLI 빠른 추가에서 한글 제목 할 일을 여러 개 만들 수 있어야 한다.
+     * 영향 범위: 새로 만드는 change id 만. 기존 id·영문 제목 동작은 동일. */
+    let id = slug(input.title)
+    if (id === 'item' || (await this.stores.change.read(id))) {
+      id = `${input.productId}-${id === 'item' ? 'c' : id}-${uniqSuffix()}`
+    }
     const meta: Record<string, unknown> = {
       id,
       type: 'change',

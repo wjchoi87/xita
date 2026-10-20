@@ -5,7 +5,7 @@
   "description": "XITA — AI-native Product OS (Human-Controlled, Agent-Operated)",
   "packageManager": "pnpm@10.33.2",
   "engines": {
-    "node": ">=22"
+    "node": ">=24 <26"
   },
   "scripts": {
     "dev:server": "pnpm --filter @xita/server dev",
@@ -13,6 +13,8 @@
     "mobile:start": "pnpm --filter xita-mobile start",
     "xita": "node apps/cli/xita.mjs",
     "rust:test": "cargo test --manifest-path rust/xita-core/Cargo.toml",
-    "test:all": "pnpm --filter @xita/server test 2>/dev/null; cargo test --manifest-path rust/xita-core/Cargo.toml"
+    "test:all": "pnpm --filter @xita/server test && cargo test --manifest-path rust/xita-core/Cargo.toml",
+    "planner:import": "pnpm --filter @xita/server exec node ace planner:import",
+    "test:server": "pnpm --filter @xita/server test"
   }
 }

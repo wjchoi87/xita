@@ -5,6 +5,7 @@ import { loadWorkspaceMeta, metaDir, type DocType } from '#v4/workspace'
 import { readText } from '#v4/fs_util'
 import { summarizeHistory, askPlan } from '#v4/ai'
 import slugify from '#utils/slug'
+import { uniqSuffix } from '#v4/domain'
 
 /*
  * v4 확장 도메인 (v0.3 §69-§81, §99-§104 이관).
@@ -154,11 +155,13 @@ export class V4Ops {
     change?: string | null
     title: string
     summary?: string | null
+    /** 과거 사건 이관 시 원래 시각 (기본: 지금) */
+    ts?: string
   }) {
     await fs.mkdir(metaDir(), { recursive: true })
     await fs.appendFile(
       this.eventsFile(),
-      `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`,
+      `${JSON.stringify({ ...entry, ts: entry.ts ?? new Date().toISOString() })}\n`,
       'utf8'
     )
   }
@@ -1210,7 +1213,11 @@ export class V4Ops {
     targetDate?: string
     description?: string
   }) {
-    const id = `${input.product}-m-${slugify(input.name)}`
+    /* 변경 전 정책: id = <product>-m-<slug(name)> 로 upsert — 한글 이름은 모두 '-m-item' 이 되어 앞 마일스톤을 조용히 덮어씀.
+     * 변경 후 정책: 같은 id 가 이미 있으면 base36 시각 접미로 새 id (덮어쓰기 금지).
+     * 영향 범위: 새 마일스톤 생성만. */
+    let id = `${input.product}-m-${slugify(input.name)}`
+    if (await this.stores.milestone.read(id)) id = `${id}-${uniqSuffix()}`
     const res = await this.stores.milestone.upsert(
       id,
       {
@@ -1288,6 +1295,71 @@ export class V4Ops {
       total: changes.length,
       overdue,
     }
+  }
+
+  /** 프로젝트 작업 보드 — 할 일(전 상태) + 마일스톤(진행률) 한 번에 (웹 '작업' 탭·CLI) */
+  async productWork(productId: string) {
+    const [changes, milestones] = await Promise.all([
+      this.stores.change.list(),
+      this.stores.milestone.list(),
+    ])
+    const mine = changes.filter((c) => c.meta.product === productId)
+    const ms = milestones
+      .filter((m) => m.meta.product === productId)
+      .map((m) => {
+        const linked = mine.filter((c) => c.meta.milestone_id === m.id)
+        const counted = linked.filter((c) => milestoneWeight(String(c.meta.status ?? 'IDEA')) >= 0)
+        const sum = counted.reduce(
+          (a, c) => a + milestoneWeight(String(c.meta.status ?? 'IDEA')),
+          0
+        )
+        const target = m.meta.target_date ? Date.parse(String(m.meta.target_date)) : 0
+        return {
+          id: m.id,
+          name: String(m.meta.name ?? m.id),
+          status: String(m.meta.status ?? 'planned'),
+          target_date: (m.meta.target_date as string | null) ?? null,
+          description: (m.meta.description as string | null) ?? null,
+          progress: counted.length ? Math.round((sum / counted.length) * 100) : 0,
+          done: linked.filter((c) => c.meta.status === 'SHIPPED').length,
+          total: linked.length,
+          overdue: target > 0 && target < Date.now() && String(m.meta.status) !== 'done',
+        }
+      })
+      .sort((a, b) =>
+        String(a.target_date ?? '9999').localeCompare(String(b.target_date ?? '9999'))
+      )
+    return {
+      changes: mine
+        .map((c) => ({
+          id: c.id,
+          name: String(c.meta.name ?? c.id),
+          status: String(c.meta.status ?? 'IDEA'),
+          priority: String(c.meta.priority ?? 'normal'),
+          milestone: (c.meta.milestone_id as string | undefined) ?? null,
+          note: changeNote(c.body),
+          created_at: (c.meta.created_at as string | undefined) ?? null,
+          updated_at: (c.meta.updated_at as string | undefined) ?? null,
+        }))
+        .sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? ''))),
+      milestones: ms,
+    }
+  }
+
+  /** 할 일 제목·우선순위·메모 수정 (상태 전이는 transitionChange 로만) */
+  async editChange(changeId: string, input: { title?: string; priority?: string; note?: string }) {
+    const c = await this.stores.change.read(changeId)
+    if (!c) throw new Error(`change not found: ${changeId}`)
+    const meta: Record<string, unknown> = { ...c.meta }
+    let body = c.body
+    if (input.title?.trim()) {
+      meta.name = input.title.trim()
+      body = body.replace(/^# .*$/m, `# ${meta.name}`)
+    }
+    if (input.priority) meta.priority = input.priority.toLowerCase()
+    if (input.note !== undefined) body = setChangeNote(body, input.note)
+    await this.stores.change.upsert(changeId, meta, body, (c.revision ?? 0) + 1)
+    return this.stores.change.read(changeId)
   }
 
   async setMilestoneStatus(milestoneId: string, status: string) {
@@ -2194,7 +2266,12 @@ export class V4Ops {
       const st = String(c.meta.status ?? '')
       if (!['BUILD', 'REVIEW', 'SHIP_READY'].includes(st)) continue
       if (productId && String(c.meta.product ?? '') !== productId) continue
-      const why = `${c.meta.intent ?? ''}${c.meta.goal ?? ''}${c.meta.why ?? ''}`.trim()
+      /* 변경 전 정책: frontmatter intent/goal/why 만 확인 — createChange 는 intent·goal 을 본문 섹션에 쓰므로
+       *   목적을 적어도 항상 'WHY 누락' 으로 잡혔다.
+       * 변경 후 정책: 본문의 'Problem / Intent'·'Goal' 섹션과 '메모'(웹/CLI 작업 탭) 도 목적으로 인정.
+       * 영향 범위: needs-you 의 SCOPE(WHY 누락) 항목 수. 목적이 정말 없는 BUILD 이상 할 일은 그대로 잡힌다. */
+      const why =
+        `${c.meta.intent ?? ''}${c.meta.goal ?? ''}${c.meta.why ?? ''}${bodyWhy(c.body)}`.trim()
       if (why) continue
       items.push({
         type: 'SCOPE',
@@ -2461,4 +2538,33 @@ export class V4Ops {
       created_new_insight: out.length === 0,
     }
   }
+}
+
+/* 할 일 본문의 '## 메모' 섹션 — 웹/CLI 에서 짧게 적는 설명 */
+const NOTE_RE = /\n## 메모\n\n([\s\S]*?)(?=\n## |$)/
+
+export function changeNote(body: string): string {
+  return (body.match(NOTE_RE)?.[1] ?? '').trim()
+}
+
+export function setChangeNote(body: string, note: string): string {
+  const text = note.trim()
+  if (NOTE_RE.test(body)) {
+    return text
+      ? body.replace(NOTE_RE, `\n## 메모\n\n${text}\n`)
+      : body.replace(NOTE_RE, '').trimEnd() + '\n'
+  }
+  return text ? `${body.trimEnd()}\n\n## 메모\n\n${text}\n` : body
+}
+
+/** 할 일 본문에서 목적으로 볼 수 있는 섹션 내용 (Problem / Intent · Goal · 메모) */
+export function bodyWhy(body: string): string {
+  const out: string[] = []
+  for (const h of ['Problem / Intent', 'Goal', '메모']) {
+    const m = body.match(
+      new RegExp(`\\n## ${h.replace(/[/]/g, '\\/')}\\n\\n([\\s\\S]*?)(?=\\n## |$)`)
+    )
+    if (m?.[1]?.trim()) out.push(m[1].trim())
+  }
+  return out.join(' ')
 }

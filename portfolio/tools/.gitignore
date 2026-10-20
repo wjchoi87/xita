@@ -1,0 +1,7 @@
+# 비밀 파일. 절대 커밋 금지.
+play-account.json
+service-account.json
+upload.jks
+*.jks
+*.keystore
+keystore.properties

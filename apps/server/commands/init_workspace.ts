@@ -16,7 +16,21 @@ export default class InitWorkspace extends BaseCommand {
 
   static settings = { loadApp: true }
 
+  /*
+   * 변경 전 정책: 실행 시 무조건 workspace.json(revision 0) 을 덮어쓰고 데모를 생성했다.
+   * 변경 후 정책: 이미 제품이 있는 workspace 면 아무것도 하지 않고 종료한다.
+   * 변경 이유: 서버 기본 workspace 가 macOS 앱과 같은 ~/.xita-workspace 로 통일돼, 실사용 데이터의
+   *   sync 커서(workspace_revision)를 0 으로 되돌리거나 데모가 섞이는 사고를 막기 위해.
+   * 영향 범위: `pnpm v4:init` — 빈 workspace 에서만 초기화/데모 생성.
+   */
   async run() {
+    const existing = await new V4Domain().products()
+    if (existing.length) {
+      this.logger.info(
+        `workspace already has ${existing.length} product(s) — init skipped (${metaDir()})`
+      )
+      return
+    }
     await ensureDir(metaDir())
     await atomicWrite(
       path.join(metaDir(), 'workspace.json'),

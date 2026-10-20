@@ -36,3 +36,16 @@ Cargo.lock
 # SwiftPM
 macos/**/.build/
 macos/**/.swiftpm/
+
+# Portfolio tools (secrets must never live in this repo)
+portfolio/**/__pycache__/
+portfolio/**/*.pyc
+portfolio/**/*.jks
+portfolio/**/*.keystore
+portfolio/**/play-account.json
+portfolio/**/service-account.json
+portfolio/**/keystore.properties
+portfolio/**/admob-*.json
+
+# Expo local state
+apps/mobile/.expo/

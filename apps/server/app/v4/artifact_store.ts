@@ -30,6 +30,8 @@ export class ArtifactStore {
     product?: string | null
     content?: string | null
     summary?: string | null
+    /** 출처·분류 등 부가 frontmatter (예: planner 이관 portfolio/kind/source) */
+    extraMeta?: Record<string, unknown>
   }) {
     if (await this.artifacts.read(input.id)) throw new Error(`Artifact already exists: ${input.id}`)
     const meta: Record<string, unknown> = {
@@ -39,6 +41,7 @@ export class ArtifactStore {
       product: input.product ?? null,
       status: 'DRAFT',
       current_revision: 1,
+      ...input.extraMeta,
     }
     const body = input.content ?? `# ${input.name}`
     const res = await this.artifacts.upsert(input.id, meta, body, 1)
@@ -54,7 +57,12 @@ export class ArtifactStore {
 
   async addRevision(
     id: string,
-    input: { content: string; summary?: string | null; changeSummary?: string | null }
+    input: {
+      content: string
+      summary?: string | null
+      changeSummary?: string | null
+      extraMeta?: Record<string, unknown>
+    }
   ) {
     const existing = await this.artifacts.read(id)
     if (!existing) throw new Error(`Artifact not found: ${id}`)
@@ -64,6 +72,7 @@ export class ArtifactStore {
       current_revision: nextRev,
       status: existing.meta.status === 'DRAFT' ? 'ACTIVE' : existing.meta.status,
       updated_at: new Date().toISOString(),
+      ...input.extraMeta,
     }
     // revision 자체 증가는 upsert 가 처리. body 는 새 컨텐츠.
     const res = await this.artifacts.upsert(id, meta, input.content, (existing.revision ?? 0) + 1)

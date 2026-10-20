@@ -79,17 +79,25 @@ export class MarkdownStore {
     const current = existing?.revision ?? 0
     const revision = nextRevision ?? current + 1
     const wr = await bumpWorkspaceRevision(1)
+    /* 변경 전 정책: 시스템 필드를 먼저 쓰고 ...meta 를 뒤에 펼침 → 호출부가 {...existing.meta, …} 로 넘기면
+     *   예전 revision·ws_rev·updated_at 이 새 값을 덮어씀 (전이·승인·우선순위·마일스톤 지정 등 모든 수정 경로).
+     * 변경 후 정책: id·type·revision·ws_rev·updated_at 은 항상 이번 쓰기 값으로 각인 (applyField·Rust storage 와 동일 규칙).
+     *   created_at 은 기존 값 유지(없으면 meta → 지금).
+     * 변경 이유: 수정된 문서의 ws_rev 가 커서보다 작게 남아 모바일 incremental pull 에서 누락되고,
+     *   revision 이 안 올라 충돌 판정·"최근 수정" 정렬이 틀어졌다.
+     * 영향 범위: MarkdownStore.upsert 를 쓰는 모든 v4 문서 쓰기. 필드 순서는 동일. */
+    const now = new Date().toISOString()
     const fullMeta = {
       id,
       type: this.type,
       revision,
       ws_rev: wr,
-      updated_at: new Date().toISOString(),
-      ...(existing
-        ? { created_at: existing.meta.created_at }
-        : { created_at: new Date().toISOString() }),
+      updated_at: now,
+      created_at: (existing?.meta.created_at as string | undefined) ?? meta.created_at ?? now,
       ...meta,
     }
+    Object.assign(fullMeta, { id, type: this.type, revision, ws_rev: wr, updated_at: now })
+    if (existing?.meta.created_at) fullMeta.created_at = existing.meta.created_at
     await atomicWrite(docPath(this.type, id), serializeDoc(fullMeta, body))
 
     // Realtime(SPEC §8): canonical mutation 을 SSE 구독자에게 브로드캐스트.

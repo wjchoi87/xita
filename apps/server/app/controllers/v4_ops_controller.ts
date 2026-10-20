@@ -380,6 +380,23 @@ export default class V4OpsController {
   async milestoneProgress({ params }: HttpContext) {
     return { data: await ops.milestoneProgress(params.id) }
   }
+  async productWork({ params }: HttpContext) {
+    return { data: await ops.productWork(params.id) }
+  }
+  async editChange({ params, request }: HttpContext) {
+    const title = request.input('title')
+    const priority = request.input('priority')
+    const note = request.input('note')
+    if (priority && !['low', 'normal', 'high', 'critical'].includes(String(priority).toLowerCase()))
+      return { data: null, error: 'priority 는 low|normal|high|critical' }
+    return {
+      data: await ops.editChange(params.id, {
+        title: title !== undefined ? String(title) : undefined,
+        priority: priority ? String(priority) : undefined,
+        note: note !== undefined ? String(note) : undefined,
+      }),
+    }
+  }
   async milestoneStatus({ params, request }: HttpContext) {
     return { data: await ops.setMilestoneStatus(params.id, String(request.input('status'))) }
   }
