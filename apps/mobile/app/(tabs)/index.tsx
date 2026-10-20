@@ -2,9 +2,7 @@ import { actionKo, statusKo, term } from '@/lib/terms'
 
 import { useRef, useState } from 'react'
 import {
-  ActivityIndicator,
   Animated,
-  Button,
   PanResponder,
   Pressable,
   ScrollView,
@@ -15,6 +13,8 @@ import {
 } from 'react-native'
 import type { CanonicalDoc } from '@/lib/types'
 import { store, useStore } from '@/state/store'
+import { Banner, Button, EmptyState, Loading } from '@/components/ui'
+import { useStyles, useTheme, type Theme } from '@/theme'
 
 /**
  * Home — "반응하고 미루는 기계" (MOBILE_UI_HANDOFF 계약).
@@ -23,6 +23,7 @@ import { store, useStore } from '@/state/store'
  */
 
 export default function HomeScreen() {
+  const styles = useStyles(makeStyles)
   const [busyConflict, setBusyConflict] = useState('')
   const phase = useStore((s) => s.phase)
   const host = useStore((s) => s.host)
@@ -34,13 +35,7 @@ export default function HomeScreen() {
   const lastError = useStore((s) => s.lastError)
   const items = useStore((s) => s.items)
 
-  if (phase === 'loading') {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    )
-  }
+  if (phase === 'loading') return <Loading />
   if (phase === 'unpaired') return <PairingScreen />
   if (!host) return null
 
@@ -48,7 +43,7 @@ export default function HomeScreen() {
   const review = changes.filter((c) => NEEDS_REVIEW.has(c.status.toUpperCase()))
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.title}>XITA</Text>
         <Text style={styles.meta}>
@@ -56,12 +51,9 @@ export default function HomeScreen() {
           {conflicts.length > 0 ? ` · 충돌 ${conflicts.length}` : ''} ·{' '}
           {online === false ? '오프라인' : '동기화됨'}
         </Text>
-        {!!lastError && (
-          <Text style={styles.error} numberOfLines={2}>
-            {humanError(lastError)}
-          </Text>
-        )}
+        {!!lastError && <Banner tone="bad">{humanError(lastError)}</Banner>}
         <Button
+          variant="secondary"
           title={pending > 0 ? '보낸 것 다시 시도' : '새로고침'}
           onPress={() => {
             if (pending > 0) void store.reconcileNow()
@@ -78,21 +70,21 @@ export default function HomeScreen() {
           <View key={c.op_id} style={styles.conflictCard}>
             <Text style={styles.cardTitle}>어긋남: {c.target_id}</Text>
             <Text style={styles.cardReason}>두 곳에서 동시에 바뀌었습니다 — Mac 의 정본을 유지하면 여기 기록이 사라집니다.</Text>
-            <Button title="Mac 버전 유지" disabled={busyConflict === c.op_id} onPress={() => { setBusyConflict(c.op_id); void store.clearConflict(c.op_id).finally(() => setBusyConflict('')) }} />
+            <Button title="Mac 버전 유지" variant="secondary" disabled={busyConflict === c.op_id} onPress={() => { setBusyConflict(c.op_id); void store.clearConflict(c.op_id).finally(() => setBusyConflict('')) }} />
           </View>
         ))}
       <ProposalCards />
 
       <Text style={styles.section}>검토 대기 중인 {term('change')}</Text>
       {review.length === 0 ? (
-        <Text style={styles.empty}>결정 대기 중인 일이 없습니다.</Text>
+        <EmptyState title="결정 대기 중인 일이 없습니다." />
       ) : (
         review.map((c) => <ChangeRow key={c.id} id={c.id} name={c.name} status={c.status} />)
       )}
 
       <Text style={styles.section}>진행 중인 {term('change')}</Text>
       {activeChanges === 0 ? (
-        <Text style={styles.empty}>진행 중인 할 일이 없습니다.</Text>
+        <EmptyState title={`진행 중인 ${term('change')}이 없습니다.`} hint={`메모 탭에서 떠오른 것을 남기면, 승인 후 ${term('change')}로 이어집니다.`} />
       ) : (
         changes
           .filter((c) => ACTIVE.has(c.status.toUpperCase()))
@@ -100,6 +92,7 @@ export default function HomeScreen() {
       )}
 
       <Text style={styles.section}>최근 움직임</Text>
+      {changes.length === 0 && <EmptyState title="아직 기록된 움직임이 없습니다." />}
       {changes.slice(0, 5).map((c) => (
         <View key={c.id} style={styles.row}>
           <Text style={styles.rowName}>{c.name}</Text>
@@ -123,16 +116,17 @@ function humanError(e: string): string {
 // ---- 결정할 일 (제안 카드) ---------------------------------------------------
 
 function ProposalCards() {
+  const styles = useStyles(makeStyles)
   const proposals = useStore((s) => s.proposals)
   const [seq, setSeq] = useState<{ on: boolean; idx: number }>({ on: false, idx: 0 })
 
-  if (proposals.length === 0) return <Text style={styles.empty}>결정 대기 중인 제안이 없습니다.</Text>
+  if (proposals.length === 0) return <EmptyState title="결정 대기 중인 제안이 없습니다." hint="호스트에서 새 제안이 오면 여기에 카드로 나타납니다." />
 
   const controls =
     !seq.on && proposals.length > 1 ? (
       <View style={styles.seqRow}>
         <Text style={styles.seqCounter}>{proposals.length}건 대기</Text>
-        <Button title="위에서부터" onPress={() => setSeq({ on: true, idx: 0 })} />
+        <Button title="위에서부터" variant="ghost" onPress={() => setSeq({ on: true, idx: 0 })} />
       </View>
     ) : null
 
@@ -178,6 +172,7 @@ const FIELD_KO: Record<string, string> = {
  * 의존성 추가 없이 PanResponder+Animated (Three-action, 3액션만 노출).
  */
 function ProposalCard({ doc, onDone, focused = false }: { doc: CanonicalDoc; onDone?: () => void; focused?: boolean }) {
+  const styles = useStyles(makeStyles)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const pan = useRef(new Animated.ValueXY()).current
@@ -237,13 +232,13 @@ function ProposalCard({ doc, onDone, focused = false }: { doc: CanonicalDoc; onD
                 {FIELD_KO[k]}: {Array.isArray(meta[k]) ? (meta[k] as string[]).join(', ') : String(meta[k])}
               </Text>
             ))}
-          <Text style={styles.hint}>{open ? '편쳐짐 — 아래 버튼 또는 스와이프' : '가볍게 치면 상세 · 오른쪽으로 밀면 승인 · 왼쪽으로 밀면 내일로'}</Text>
+          <Text style={styles.hint}>{open ? '펼쳐짐 — 아래 버튼 또는 스와이프' : '가볍게 치면 상세 · 오른쪽으로 밀면 승인 · 왼쪽으로 밀면 내일로'}</Text>
         </Pressable>
         {open && (
           <View style={styles.cardActions}>
             <Button title="승인" disabled={busy} onPress={() => act('approve')} />
-            <Button title="거절" color="red" disabled={busy} onPress={() => act('reject')} />
-            <Button title="내일로" disabled={busy} onPress={() => act('snooze')} />
+            <Button title="거절" variant="danger" disabled={busy} onPress={() => act('reject')} />
+            <Button title="내일로" variant="secondary" disabled={busy} onPress={() => act('snooze')} />
           </View>
         )}
       </Animated.View>
@@ -254,6 +249,7 @@ function ProposalCard({ doc, onDone, focused = false }: { doc: CanonicalDoc; onD
 // ---- 할 일 행 ----------------------------------------------------------------
 
 function ChangeRow({ id, name, status }: { id: string; name: string; status: string }) {
+  const styles = useStyles(makeStyles)
   return (
     <View style={styles.row}>
       <Text style={styles.rowName}>{name}</Text>
@@ -281,17 +277,21 @@ const NEXT = new Map<string, string[]>([
 ])
 
 function PairingScreen() {
+  const styles = useStyles(makeStyles)
+  const theme = useTheme()
   const [hostInput, setHostInput] = useState<string>('')
   const [code, setCode] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [fail, setFail] = useState<string | null>(null)
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.center}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.content, styles.center]} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>호스트와 연결</Text>
       <TextInput
         style={styles.input}
-        placeholder="http://192.168.0.5:3333 (macOS 호스트)"
+        placeholder="호스트 주소 (예: http://192.168.0.5:3333)"
+        placeholderTextColor={theme.colors.textFaint}
+        keyboardAppearance={theme.scheme}
         autoCapitalize="none"
         autoCorrect={false}
         value={hostInput}
@@ -299,12 +299,14 @@ function PairingScreen() {
       />
       <TextInput
         style={styles.input}
-        placeholder="macOS 에서 받은 페어링 코드"
+        placeholder="페어링 코드 (8자리)"
+        placeholderTextColor={theme.colors.textFaint}
+        keyboardAppearance={theme.scheme}
         autoCapitalize="characters"
         value={code}
         onChangeText={setCode}
       />
-      {!!fail && <Text style={styles.error}>{fail}</Text>}
+      {!!fail && <Banner tone="bad">{fail}</Banner>}
       <Button
         title="페어링"
         disabled={busy || !hostInput.trim() || !code.trim()}
@@ -319,52 +321,68 @@ function PairingScreen() {
         }}
       />
       <Text style={styles.hint}>
-        macOS 앱의 설정 화면에서 페어링 코드를 발급한 뒤 입력하세요. 코드는 10분 후 만료됩니다.
+        컴퓨터의 XITA 웹 콘솔 → 설정 → 모바일 연결에서 주소와 페어링 코드를 확인하세요 (터미널이면 xita pair). 코드는 10분 후 만료돼요.
       </Text>
     </ScrollView>
   )
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
-  center: { flexGrow: 1, justifyContent: 'center' },
-  header: { marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: '700' },
-  meta: { fontSize: 12, color: '#666', marginVertical: 6 },
-  error: { fontSize: 12, color: '#b00020', marginBottom: 6 },
-  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  section: { fontSize: 16, fontWeight: '600', marginTop: 16, marginBottom: 8 },
-  empty: { color: '#999', fontStyle: 'italic' },
-  seqCounter: { fontSize: 12, color: '#666', marginBottom: 6 },
-  seqRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  conflictCard: {
-    borderWidth: 1,
-    borderColor: '#e0a000',
-    borderRadius: 10,
-    padding: 12,
-    marginVertical: 4,
-    gap: 6,
-    backgroundColor: '#fff8ea',
-  },
-  card: {
-    borderWidth: 1,
-    borderColor: '#c8a000',
-    borderRadius: 10,
-    padding: 12,
-    marginVertical: 4,
-    backgroundColor: '#fffdf2',
-  },
-  cardFocused: { borderColor: '#8a7000', borderWidth: 2 },
-  cardTitle: { fontWeight: '700', fontSize: 15 },
-  cardBody: { color: '#555', marginTop: 2 },
-  cardReason: { fontSize: 12, color: '#888', marginTop: 2 },
-  hint: { fontSize: 11, color: '#aaa', marginTop: 6 },
-  cardActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' },
-  rowName: { flex: 1, fontSize: 15 },
-  rowStatus: { fontSize: 12, color: '#666', minWidth: 48, textAlign: 'right' },
-  stageGroup: { flexDirection: 'row', gap: 6 },
-  stageBtn: { backgroundColor: '#eef', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
-  stageBtnText: { fontSize: 12, fontWeight: '600', color: '#335' },
-  input: { borderWidth: StyleSheet.hairlineWidth, borderColor: '#999', borderRadius: 8, padding: 10, marginVertical: 8, width: '100%' },
-})
+const makeStyles = ({ colors: c, space, radius }: Theme) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.bg },
+    content: { padding: space.lg, paddingBottom: space.xl * 2 },
+    center: { flexGrow: 1, justifyContent: 'center', gap: space.sm },
+    header: { marginBottom: space.md, gap: space.sm },
+    title: { fontSize: 24, fontWeight: '700', color: c.text },
+    meta: { fontSize: 12, color: c.textMuted },
+    sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    section: { fontSize: 16, fontWeight: '600', color: c.text, marginTop: space.lg, marginBottom: space.sm },
+    seqCounter: { fontSize: 12, color: c.textMuted, marginBottom: 6 },
+    seqRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+    conflictCard: {
+      borderWidth: 1,
+      borderColor: c.warn,
+      borderRadius: radius.md,
+      padding: space.md,
+      marginVertical: space.xs,
+      gap: 6,
+      backgroundColor: c.warnSoft,
+    },
+    card: {
+      borderWidth: 1,
+      borderColor: c.warn,
+      borderRadius: radius.md,
+      padding: space.md,
+      marginVertical: space.xs,
+      backgroundColor: c.surface,
+    },
+    cardFocused: { borderWidth: 2, backgroundColor: c.warnSoft },
+    cardTitle: { fontWeight: '700', fontSize: 15, color: c.text },
+    cardBody: { color: c.textMuted, marginTop: 2 },
+    cardReason: { fontSize: 12, color: c.textMuted, marginTop: 2 },
+    hint: { fontSize: 11, color: c.textFaint, marginTop: 6 },
+    cardActions: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: space.sm,
+      paddingVertical: space.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    rowName: { flex: 1, fontSize: 15, color: c.text },
+    rowStatus: { fontSize: 12, color: c.textMuted, minWidth: 48, textAlign: 'right' },
+    stageGroup: { flexDirection: 'row', gap: 6 },
+    stageBtn: { backgroundColor: c.accentSoft, paddingHorizontal: 10, paddingVertical: space.xs, borderRadius: 6 },
+    stageBtnText: { fontSize: 12, fontWeight: '600', color: c.accent },
+    input: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+      borderRadius: radius.sm,
+      padding: 10,
+      marginVertical: space.sm,
+      width: '100%',
+      backgroundColor: c.surface,
+      color: c.text,
+    },
+  })

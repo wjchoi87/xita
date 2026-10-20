@@ -1,3 +1,4 @@
+import { Platform } from 'react-native'
 import { newDeviceId } from '../lib/ids'
 import type {
   CanonicalDoc,
@@ -24,12 +25,44 @@ export class SyncClientError extends Error {
   }
 }
 
+/*
+ * 변경 전 정책: sync 요청은 `${baseUrl}/sync/...`, SSE 는 `${baseUrl}/api/v1/realtime/...` 로 만들어
+ *   사용자가 안내대로 http://<ip>:3333 을 넣으면 페어링이 404, /api/v1 까지 넣으면 SSE 가 404 였다.
+ * 변경 후 정책: 호스트는 항상 origin(http://<ip>:3333)으로 정규화해 저장하고, REST 는 클라이언트가
+ *   /api/v1 을 붙인다. 이미 /api/v1 이 붙은 채 저장된 값도 같은 규칙으로 흡수한다.
+ * 변경 이유: 2026-10-17 에뮬레이터 실기 테스트에서 페어링이 "Cannot POST:/sync/pair" 로 실패.
+ * 영향 범위: 페어링·pull/push·conflict·proposal REST 호출 URL. 큐/커서/op 의미는 변경 없음.
+ */
+export const API_PREFIX = '/api/v1'
+
+function defaultDeviceName(): string {
+  const c = Platform.constants as { Model?: string; Brand?: string } | undefined
+  if (Platform.OS === 'android') return [c?.Brand, c?.Model].filter(Boolean).join(' ') || 'Android'
+  if (Platform.OS === 'ios') return 'iPhone'
+  return Platform.OS
+}
+
+export function hostOrigin(input: string): string {
+  const trimmed = input
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api\/v1$/, '')
+  // "192.168.0.5:3333" 처럼 스킴을 빼고 입력해도 연결되게
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+}
+
 export class SyncClient {
   /** 보안토큰은 호출부(캐시 레이어)가 관리하지만, 기본 동작은 여기서 유지. */
   private token: string | null = null
   private deviceId: string = newDeviceId()
 
-  constructor(public baseUrl: string) {}
+  constructor(public baseUrl: string) {
+    this.baseUrl = hostOrigin(baseUrl)
+  }
+
+  private url(path: string) {
+    return `${this.baseUrl}${API_PREFIX}${path}`
+  }
 
   setToken(token: string | null) {
     this.token = token
@@ -47,7 +80,7 @@ export class SyncClient {
       ...(init?.headers as Record<string, string> | undefined),
     }
     if (this.token) headers[TOKEN_HEADER] = this.token
-    const res = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
+    const res = await fetch(this.url(path), { ...init, headers })
     const text = await res.text()
     let data: any = {}
     try {
@@ -72,7 +105,7 @@ export class SyncClient {
       ...(init?.headers as Record<string, string> | undefined),
     }
     if (this.token) headers[TOKEN_HEADER] = this.token
-    const res = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
+    const res = await fetch(this.url(path), { ...init, headers })
     const text = await res.text()
     let data: any = {}
     try {
@@ -85,10 +118,11 @@ export class SyncClient {
   }
 
   // ---- pairing (v0.4 §14) ------------------------------------------------
-  async pair(code: string, name = 'My iPhone'): Promise<PairResponse> {
+  /** 기기 이름·플랫폼은 실제 런타임 값 (이전: 'My iPhone'/'iOS' 고정 → 안드로이드도 iPhone 으로 등록됐다) */
+  async pair(code: string, name = defaultDeviceName()): Promise<PairResponse> {
     return this.request<PairResponse>('/sync/pair', {
       method: 'POST',
-      body: JSON.stringify({ code, device_id: this.deviceId, name, platform: 'iOS' }),
+      body: JSON.stringify({ code, device_id: this.deviceId, name, platform: Platform.OS }),
     })
   }
 

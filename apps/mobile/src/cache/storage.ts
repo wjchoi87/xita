@@ -64,6 +64,10 @@ export const storage = {
   async setHost(host: string) {
     await writeJson(K.host, host)
   },
+  /** 호스트 주소 삭제 — 연결 해제/호스트 변경 시. 캐시(docs/cursor/ops)는 건드리지 않는다. */
+  async clearHost() {
+    await AsyncStorage.removeItem(K.host)
+  },
   async getDeviceId(): Promise<string | null> {
     return (await readJson<string>(K.deviceId)) ?? null
   },
@@ -79,6 +83,12 @@ export const storage = {
       return (await readJson<string>(K.token)) ?? null
     }
   },
+  /*
+   * 변경 전 정책: SecureStore 실패(Expo Go 등) 시 token 이 있으면 AsyncStorage fallback 에 쓰고, null 이면 아무것도 안 함.
+   * 변경 후 정책: null(삭제) 요청이면 fallback 키도 함께 지운다. 저장 경로는 동일.
+   * 변경 이유: 설정의 "연결 해제" 후에도 fallback 토큰이 남아 재시작 시 다시 페어링된 상태로 복원되는 문제 방지.
+   * 영향 범위: setToken(null) 호출 시(연결 해제)에만. SecureStore 지원 기기의 동작은 동일.
+   */
   async setToken(token: string | null) {
     try {
       if (token) {
@@ -88,6 +98,7 @@ export const storage = {
       }
     } catch {
       if (token) await writeJson(K.token, token)
+      else await AsyncStorage.removeItem(K.token)
     }
   },
 }

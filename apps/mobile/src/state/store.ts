@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { openEventStream, type SSEHandle } from '../api/sse'
-import { SyncClient } from '../api/sync'
+import { SyncClient, hostOrigin } from '../api/sync'
 import { storage } from '../cache/storage'
 import { newDeviceId, newOpId, slug } from '../lib/ids'
 import type { CanonicalDoc, Operation, SyncConflict, UiItem } from '../lib/types'
@@ -17,6 +17,8 @@ export interface StoreState {
   phase: 'loading' | 'unpaired' | 'ready'
   host: string | null
   items: UiItem[]
+  /** 제품 원본 doc (meta 의 portfolio/version/production_status 등 표시용 — UiItem 에는 없음). 읽기 전용 프로젝션. */
+  productDocs: CanonicalDoc[]
   proposals: CanonicalDoc[]
   workspaceRevision: number
   needsYou: number
@@ -32,6 +34,7 @@ const initial: StoreState = {
   phase: 'loading',
   host: null,
   items: [],
+  productDocs: [],
   proposals: [],
   workspaceRevision: 0,
   needsYou: 0,
@@ -75,7 +78,8 @@ class Store {
 
   async init() {
     try {
-      const host = await storage.getHost()
+      const storedHost = await storage.getHost()
+      const host = storedHost ? hostOrigin(storedHost) : null
       const token = await storage.getToken()
       const storedDevice = await storage.getDeviceId()
       if (storedDevice) this.deviceId = storedDevice
@@ -102,7 +106,7 @@ class Store {
   }
 
   async setHost(host: string) {
-    const normalized = host.replace(/\/+$/, '')
+    const normalized = hostOrigin(host)
     await storage.setHost(normalized)
     this.client = new SyncClient(normalized)
     this.client.setDeviceId(this.deviceId)
@@ -118,6 +122,25 @@ class Store {
     this.set({ phase: 'ready' })
     await this.refresh()
     this.connectRealtime()
+  }
+
+  /*
+   * 변경 전 정책: 호스트/토큰은 페어링 화면에서 설정만 가능했고 앱 안에서 해제하는 경로가 없음.
+   * 변경 후 정책: unpair() 가 실시간 연결을 닫고 토큰·호스트를 지운 뒤 phase='unpaired' 로 전환 → 홈이 페어링 화면이 된다.
+   *   로컬 캐시(docs/cursor)·전송 대기 op 큐·미루기 목록은 보존한다(같은 호스트로 다시 붙으면 그대로 이어서 전송).
+   * 변경 이유: 설정 화면의 "호스트 변경/연결 해제" 요구. sync 의미(큐/커서 규칙)는 바꾸지 않는다.
+   * 영향 범위: 설정 화면에서 명시적으로 호출할 때만. 해제 중엔 refresh/flush 가 phase 가드로 멈춘다.
+   *   주의: 다른 호스트로 페어링하면 이전 커서·대기 op 가 그대로 남는다(정리 정책은 별도 결정 필요).
+   */
+  async unpair() {
+    this.sse?.close()
+    this.sse = null
+    if (this.sseDebounce) clearTimeout(this.sseDebounce)
+    this.sseDebounce = null
+    await storage.setToken(null)
+    await storage.clearHost()
+    this.client = null
+    this.set({ phase: 'unpaired', host: null, online: null, lastError: null })
   }
 
   /** SSE 구독 — 서버 canonical mutation 이벤트 수신 시 (debounce) pull. 폴링은 백업으로 유지. */
@@ -338,6 +361,7 @@ class Store {
     const activeChanges = items.filter((i) => i.type === 'change' && ACTIVE.has(upper(i.status))).length
     this.set({
       items,
+      productDocs: this.docs.filter((d) => d.type === 'product'),
       proposals: this.pendingProposals,
       workspaceRevision: this.cursor,
       needsYou,

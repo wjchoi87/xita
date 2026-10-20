@@ -2,7 +2,6 @@ import * as ImagePicker from 'expo-image-picker'
 import { MediaTypeOptions } from 'expo-image-picker'
 import { useRef, useState } from 'react'
 import {
-  Button,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -12,7 +11,10 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { Banner, Button } from '@/components/ui'
+import { term } from '@/lib/terms'
 import { store, useStore } from '@/state/store'
+import { useStyles, useTheme, type Theme } from '@/theme'
 
 /**
  * Capture — 캡처(텍스트/이미지) → 메모 함지로 (v0.4 §20, §26).
@@ -26,6 +28,8 @@ export default function CaptureScreen() {
   const [saved, setSaved] = useState(false)
   const pending = useStore((s) => s.pending)
   const titleRef = useRef<TextInput>(null)
+  const theme = useTheme()
+  const styles = useStyles(makeStyles)
 
   const pickImage = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -51,13 +55,15 @@ export default function CaptureScreen() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.body}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>메모 남기기</Text>
         <Text style={styles.meta}>제목만 적어도 됩니다. 어느 제품에 속할지는 승인할 때 정해집니다.</Text>
         <TextInput
           ref={titleRef}
           style={styles.input}
           placeholder="지금 떠오른 것 한 줄"
+          placeholderTextColor={theme.colors.textFaint}
+          keyboardAppearance={theme.scheme}
           value={title}
           onChangeText={setTitle}
           autoFocus
@@ -67,30 +73,42 @@ export default function CaptureScreen() {
         <TextInput
           style={[styles.input, styles.multiline]}
           placeholder="내용 (선택)"
+          placeholderTextColor={theme.colors.textFaint}
+          keyboardAppearance={theme.scheme}
           multiline
           value={content}
           onChangeText={setContent}
         />
         {imageUri && (
-          <Image source={{ uri: imageUri }} style={{ width: 160, height: 160, borderRadius: 8 }} />
+          <Image source={{ uri: imageUri }} style={styles.image} />
         )}
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Button title="사진 첨부" onPress={() => void pickImage()} />
+        <View style={styles.actions}>
+          <Button title="사진 첨부" variant="secondary" onPress={() => void pickImage()} />
           <Button title="저장" onPress={submit} disabled={!title.trim()} />
         </View>
-        {saved && <Text style={styles.saved}>저장했습니다 — 호스트와 연결되면 자동 전송됩니다.</Text>}
-        {pending > 0 && <Text style={styles.meta}>전송 대기 중인 메모 {pending}건</Text>}
+        {saved && <Banner tone="ok">저장했습니다 — 호스트와 연결되면 자동 전송됩니다.</Banner>}
+        {pending > 0 && <Text style={styles.meta}>전송 대기 중인 {term('workbench')} {pending}건</Text>}
       </ScrollView>
     </KeyboardAvoidingView>
   )
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 16, gap: 12 },
-  title: { fontSize: 22, fontWeight: '700' },
-  meta: { fontSize: 12, color: '#666' },
-  saved: { fontSize: 13, color: '#1a7f37' },
-  input: { borderWidth: StyleSheet.hairlineWidth, borderColor: '#999', borderRadius: 8, padding: 12 },
-  multiline: { minHeight: 120, textAlignVertical: 'top' },
-})
+const makeStyles = ({ colors: c, space, radius }: Theme) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.bg },
+    body: { padding: space.lg, gap: space.md },
+    title: { fontSize: 22, fontWeight: '700', color: c.text },
+    meta: { fontSize: 12, color: c.textMuted },
+    input: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+      borderRadius: radius.sm,
+      padding: space.md,
+      backgroundColor: c.surface,
+      color: c.text,
+      fontSize: 15,
+    },
+    multiline: { minHeight: 120, textAlignVertical: 'top' },
+    image: { width: 160, height: 160, borderRadius: radius.sm, backgroundColor: c.surfaceAlt },
+    actions: { flexDirection: 'row', gap: space.sm },
+  })

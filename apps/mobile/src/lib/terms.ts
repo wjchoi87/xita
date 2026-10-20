@@ -1,6 +1,8 @@
 /* 표시 용어 계층 — macOS XUI.term과 1:1 동일 원리 (화면은 사용자 언어, 데이터 키 불변)
  * 근거: 경쟁 5제품 공통 — 진행/추상명사를 그릇명으로 안 씀(셀 수 있는 명사만). 'Change'→'할 일' */
 const TERM: Record<string, string> = {
+  product: '제품',
+  portfolio: '포트폴리오',
   change: '할 일',
   workbench: '메모',
   proposal: '제안',
@@ -27,6 +29,15 @@ const STATUS_KO: Record<string, string> = {
   rejected: '거절됨',
   active: '진행',
   paused: '보류',
+  archived: '보관됨',
+  // 제품 운영 상태 (product.production_status — 대문자 정규화로 'production' 도 매칭)
+  PRODUCTION: '운영 중',
+  BETA: '베타',
+  ALPHA: '알파',
+  INTERNAL: '내부 테스트',
+  DEVELOPMENT: '개발 중',
+  MAINTENANCE: '유지보수',
+  DEPRECATED: '지원 종료',
 }
 /** 상태 전이 버튼 = 동사형 (상태 어휘와 티어 분리 — Status Vocabulary by Tier). */
 const ACTION_KO: Record<string, string> = {
