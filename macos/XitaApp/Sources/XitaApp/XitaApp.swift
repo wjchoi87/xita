@@ -24,6 +24,7 @@ struct XitaApp: App {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 720, minHeight: 480)
+                .xitaAppearance()
                 .task {
                     do {
                         try model.bootstrapDemo()
@@ -36,10 +37,23 @@ struct XitaApp: App {
         .defaultPosition(.center)
         .windowResizability(.contentMinSize)
 
+        /* 표준 macOS 설정 창 (⌘,) — 일반 탭: 화면 테마 + 기존 설정(SettingsView 재사용).
+         * 사이드바 '설정' 항목도 같은 SettingsView 를 그대로 보여준다. */
+        Settings {
+            TabView {
+                SettingsView()
+                    .tabItem { Label("일반", systemImage: "gearshape") }
+            }
+            .environmentObject(model)
+            .frame(width: 600, height: 560)
+            .xitaAppearance()
+        }
+
         /* MenuBarExtra — 네이티브 capability(Q13): 앱을 열지 않고도 "나를 기다리는 것"이 보이고
          * 메모를 즉시 담는다(Drafts cold-open 정신). Needs You 0 이면 조용히 회색 아이콘. */
         MenuBarExtra {
             MenuBarContent(model: model)
+                .xitaAppearance()
         } label: {
             Image(systemName: model.needsYouCount > 0 ? "bell.badge.fill" : "bell")
         }

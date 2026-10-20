@@ -51,8 +51,14 @@ struct WorkbenchDetailView: View {
                         HStack {
                             Text("30일 이상 변경이 없습니다").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Button("유지") { try? model.keepWorkbench(id: item.id) }.controlSize(.small)
-                            Button("아카이브") { try? model.archiveWorkbench(id: item.id) }
+                            Button("유지") {
+                                do { try model.keepWorkbench(id: item.id) }
+                                catch { model.lastError = "유지로 표시하지 못했습니다 — \(error)" }
+                            }.controlSize(.small)
+                            Button("아카이브") {
+                                do { try model.archiveWorkbench(id: item.id) }
+                                catch { model.lastError = "보관하지 못했습니다 — \(error)" }
+                            }
                                 .controlSize(.small).tint(.orange)
                         }
                     }

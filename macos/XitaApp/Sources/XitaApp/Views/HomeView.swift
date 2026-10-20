@@ -8,16 +8,33 @@ import XitaCoreBridge
 
 // ---- Portfolio summary -------------------------------------------------------
 
+/* Home 1면 구성 (2026-10 내비게이션 감사 + 포트폴리오 흡수)
+ * 변경 전 정책: 지표 → 메모 캡처 → (있을 때만) 결정할 일 → Ask 순. 캡처 실패는 try? 로 조용히 묻힘, 성공 표시 없음.
+ * 변경 후 정책: 지표 → 내가 결정할 일(항상 노출, 행 클릭 시 해당 화면 이동) → 프로젝트 그리드(보관 제외, 카드 클릭 = 제품 선택)
+ *   → 메모 캡처(실패는 model.lastError 로 표시, 성공 시 잠깐 확인 문구) → Ask → 나머지. 헤더에 '웹 콘솔 열기'.
+ * 변경 이유: 사람이 먼저 봐야 할 것(결정)을 맨 위로, 여러 앱 저장소를 한눈에, 사용자 입력 실패를 숨기지 않기 위함
+ * 영향 범위: Home 화면 표시/입력 피드백만. capture 데이터 규칙 무변경 */
 struct PortfolioSummaryView: View {
     @EnvironmentObject private var model: AppModel
     let review: [AppModel.Item]
+    @Binding var selection: AppModel.Selection?
     @State private var captureTitle = ""
     @State private var captureBody = ""
+    @State private var captureSaved = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("내 제품판").font(.title2.bold())
+                HStack(alignment: .firstTextBaseline) {
+                    Text("내 제품판").font(.title2.bold())
+                    Spacer()
+                    Button {
+                        openWebConsole()
+                    } label: {
+                        Label("웹 콘솔 열기", systemImage: "safari")
+                    }
+                    .help(PortfolioLogic.webConsoleURL()?.absoluteString ?? "")
+                }
                 Text(model.summaryText()).font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 16) {
                     stat("\(model.products.count)개", "제품")
@@ -25,6 +42,10 @@ struct PortfolioSummaryView: View {
                     stat("\(model.needsYouCount)건", "결정 대기", accent: model.needsYouCount > 0)
                     stat("\(model.items.filter { $0.type == "capabilities" }.count)개", "기능")
                 }
+                Divider()
+                decisionsSection
+                Divider()
+                projectsGrid
                 Divider()
                 Text("메모 남기기 — 먼저 담고 나중에 옮깁니다").font(.headline)
                 TextField("제목", text: $captureTitle)
@@ -34,35 +55,17 @@ struct PortfolioSummaryView: View {
                     .frame(minHeight: 90)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
                 HStack {
-                    Button("저장") {
-                        let t = captureTitle.trimmingCharacters(in: .whitespaces)
-                        guard !t.isEmpty else { return }
-                        try? model.capture(title: t, content: captureBody)
-                        captureTitle = ""
-                        captureBody = ""
+                    Button("저장") { saveCapture() }
+                        .disabled(captureTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if captureSaved {
+                        Label("메모함에 담았습니다", systemImage: "checkmark.circle.fill")
+                            .font(.caption).foregroundStyle(.green)
                     }
-                    .disabled(captureTitle.trimmingCharacters(in: .whitespaces).isEmpty)
                     if let err = model.lastError {
                         Text(err).font(.caption).foregroundStyle(.red)
                     }
                 }
-                if !review.isEmpty || !model.waitingDispatches.isEmpty || !model.conflicts.isEmpty {
-                    Divider()
-                    Text("내가 결정할 일").font(.headline)
-                    /* 에이전트 대기 줄 — "방치하면 조용히 죽는 병목"을 Home 1면에 (VK Needs Attention) */
-                    ForEach(model.waitingDispatches) { d in
-                        Label("에이전트가 \(XUI.termStatus(d.status)) — \(d.name)", systemImage: "bubble.exclamation")
-                            .foregroundStyle(d.status.uppercased() == "AWAITING_INPUT" ? Color.red : Color.orange)
-                    }
-                    ForEach(model.conflicts) { c in
-                        Label("어긋남: \(model.item("changes", c.targetId)?.name ?? c.targetId)", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    }
-                    ForEach(review) { c in
-                        Label("\(c.name) — \(XUI.termStatus(c.status))", systemImage: "eye")
-                            .foregroundStyle(.orange)
-                    }
-                }
+                askCard
                 if !model.rejectedProposals.isEmpty {
                     Divider()
                     Text("거절한 제안 — 기각도 이력입니다").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
@@ -75,12 +78,96 @@ struct PortfolioSummaryView: View {
                         }
                     }
                 }
-                askCard
                 portfolioInsights
                 Spacer()
             }
             .padding()
             .onAppear(perform: consumePaletteQuestion)
+        }
+    }
+
+    private func saveCapture() {
+        let t = captureTitle.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        do {
+            try model.capture(title: t, content: captureBody)
+        } catch {
+            model.lastError = "메모를 담지 못했습니다 — \(error)"
+            return
+        }
+        // applyMulti 는 REJECTED/CONFLICT 를 throw 대신 lastError 로 알린다 → 그때는 입력을 지우지 않는다
+        guard model.lastError == nil else { return }
+        captureTitle = ""
+        captureBody = ""
+        captureSaved = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { captureSaved = false }
+    }
+
+    private func openWebConsole() {
+        guard let url = PortfolioLogic.webConsoleURL() else {
+            model.lastError = "웹 콘솔 주소가 올바르지 않습니다 — XITA_HOST 를 확인하세요"
+            return
+        }
+        if !NSWorkspace.shared.open(url) {
+            model.lastError = "웹 콘솔을 열지 못했습니다 — \(url.absoluteString)"
+        }
+    }
+
+    // ---- 내가 결정할 일 (Home 1순위) -------------------------------------------
+
+    @ViewBuilder private var decisionsSection: some View {
+        Text("내가 결정할 일").font(.headline)
+        if review.isEmpty && model.waitingDispatches.isEmpty && model.conflicts.isEmpty && model.pendingProposals.isEmpty {
+            Label("없음 — 괜찮습니다", systemImage: "checkmark.circle")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        /* 에이전트 대기 줄 — "방치하면 조용히 죽는 병목"을 Home 1면에 (VK Needs Attention) */
+        ForEach(model.waitingDispatches) { d in
+            decisionRow("에이전트가 \(XUI.termStatus(d.status)) — \(d.name)", icon: "bubble.exclamation",
+                        color: d.status.uppercased() == "AWAITING_INPUT" ? .red : .orange, to: .agents)
+        }
+        ForEach(model.conflicts) { c in
+            decisionRow("어긋남: \(model.item("changes", c.targetId)?.name ?? c.targetId)", icon: "exclamationmark.triangle.fill",
+                        color: .orange, to: .change(c.targetId))
+        }
+        ForEach(model.pendingProposals) { pr in
+            decisionRow("제안: \(pr.name)", icon: "arrow.triangle.turn.up.right.diamond",
+                        color: .purple, to: .change(pr.id.hasSuffix("-") ? String(pr.id.dropLast()) : pr.id))
+        }
+        ForEach(review) { c in
+            decisionRow("\(c.name) — \(XUI.termStatus(c.status))", icon: "eye", color: .orange, to: .change(c.id))
+        }
+    }
+
+    private func decisionRow(_ text: String, icon: String, color: Color, to target: AppModel.Selection) -> some View {
+        Button { selection = target } label: {
+            HStack {
+                Label(text, systemImage: icon).foregroundStyle(color)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // ---- 프로젝트 그리드 (포트폴리오) -------------------------------------------
+
+    @ViewBuilder private var projectsGrid: some View {
+        let cards = model.portfolioCards.filter { !$0.archived }
+        HStack {
+            Text("프로젝트").font(.headline)
+            Text("\(cards.count)").font(.caption.monospaced()).foregroundStyle(.secondary)
+        }
+        if cards.isEmpty {
+            Text("아직 제품이 없습니다 — 사이드바에서 새 제품을 만드세요").font(.caption).foregroundStyle(.secondary)
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: XUI.gap)], alignment: .leading, spacing: XUI.gap) {
+                ForEach(cards) { c in
+                    Button { selection = .product(c.id) } label: { ProjectCardView(card: c) }
+                        .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -186,5 +273,55 @@ struct PortfolioSummaryView: View {
         .frame(maxWidth: .infinity)
         .padding(10)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// Home 프로젝트 그리드 카드 1장 — 값은 PortfolioCard 캐시만 읽는다(FFI 없음)
+struct ProjectCardView: View {
+    let card: PortfolioCard
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(card.name).font(.headline).lineLimit(1)
+                if !card.codename.isEmpty && card.codename != card.name {
+                    Text(card.codename).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if !card.version.isEmpty {
+                    Text(card.version).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 6) {
+                if !card.productionStatus.isEmpty { XUI.statusChip(card.productionStatus) }
+                if !card.monetization.isEmpty {
+                    Text(card.monetization).font(.caption2)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(.quaternary.opacity(0.5), in: Capsule())
+                }
+            }
+            HStack(spacing: 10) {
+                Label("할 일 \(card.activeChanges)", systemImage: "checklist")
+                if let code = card.storeProduction {
+                    Label("스토어 \(code)", systemImage: "bag")
+                        .help("Play production 트랙 versionCode")
+                }
+                Spacer(minLength: 0)
+                if card.repoPath.isEmpty {
+                    Image(systemName: "folder.badge.questionmark").foregroundStyle(.tertiary)
+                        .help("연결된 저장소 경로 없음")
+                } else {
+                    Image(systemName: card.repoExists ? "folder.fill" : "folder.badge.minus")
+                        .foregroundStyle(card.repoExists ? Color.accentColor : XUI.caution)
+                        .help(card.repoExists ? card.repoPath : "경로를 찾을 수 없음: \(card.repoPath)")
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(XUI.pad)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: XUI.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: XUI.cardRadius).strokeBorder(.separator.opacity(0.5)))
+        .contentShape(RoundedRectangle(cornerRadius: XUI.cardRadius))
     }
 }

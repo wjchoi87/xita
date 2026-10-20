@@ -56,12 +56,16 @@ struct ScoreEditorMenu: View {
     @State private var cache: [String: Double] = [:]
 
     private func save() {
-        try? model.scoreChange(
-            changeId: changeId,
-            pop: Int(cache["s_pop"] ?? 5), need: Int(cache["s_need"] ?? 5),
-            strat: Int(cache["s_strat"] ?? 5), effort: Int(cache["s_effort"] ?? 5),
-            conf: Int(cache["s_conf"] ?? 5)
-        )
+        do {
+            try model.scoreChange(
+                changeId: changeId,
+                pop: Int(cache["s_pop"] ?? 5), need: Int(cache["s_need"] ?? 5),
+                strat: Int(cache["s_strat"] ?? 5), effort: Int(cache["s_effort"] ?? 5),
+                conf: Int(cache["s_conf"] ?? 5)
+            )
+        } catch {
+            model.lastError = "점수를 저장하지 못했습니다 — \(error)"
+        }
     }
 }
 
@@ -149,7 +153,7 @@ struct BoardCard: View {
             }
             if (fields["intent"] ?? "").isEmpty && (fields["goal"] ?? "").isEmpty {
                 Label("이유 미기입", systemImage: "questionmark.diamond")
-                    .font(.caption2).foregroundStyle(.yellow)
+                    .font(.caption2).foregroundStyle(XUI.caution)
                     .help("만드는 중 이상인데 이유가 비면 '내가 결정할 일'로 올라옵니다 — 우클릭으로 상세에서 채우세요")
             }
         }

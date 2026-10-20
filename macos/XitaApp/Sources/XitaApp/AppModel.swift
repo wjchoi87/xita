@@ -24,6 +24,7 @@ public final class AppModel: ObservableObject {
     }
 
     public enum Selection: Hashable {
+        case home
         case product(String)
         case change(String)
         case workbench(String)
@@ -45,6 +46,8 @@ public final class AppModel: ObservableObject {
     }
 
     @Published public private(set) var conflicts: [ConflictInfo] = []
+    /// 포트폴리오 카드 캐시 — refresh() 마다 1회 계산(뷰가 프레임마다 getDoc FFI 를 부르지 않도록)
+    @Published private(set) var portfolioCards: [PortfolioCard] = []
     @Published public var lastError: String?
 
     public let workspaceDir: String
@@ -163,6 +166,33 @@ public final class AppModel: ObservableObject {
                 kind: c["kind"] as? String ?? "update"
             )
         }
+        portfolioCards = buildPortfolioCards()
+    }
+
+    /* 포트폴리오 카드 투영 (planner 흡수 — docs/PORTFOLIO.md)
+     * 변경 전 정책: 제품은 name/status 만 표시, portfolio/codename/repo_path/store_tracks 등 확장 필드 미사용
+     * 변경 후 정책: refresh 때 제품마다 getDoc 1회로 확장 필드를 읽어 PortfolioCard 로 캐시.
+     *   진행 중 할 일 = IDEA/PLAN/BUILD/REVIEW/SHIP_READY (서버 domain.productState activeChanges 와 동일 정의).
+     *   repo_path 는 실제 폴더 존재 여부도 함께 기록.
+     * 변경 이유: 여러 앱 저장소를 한 화면(Home 프로젝트 그리드·사이드바 그룹)에서 보기 위함
+     * 영향 범위: 읽기 전용 캐시. 정본 파일·스키마 무변경, refresh 1회당 제품 수만큼 getDoc 추가 */
+    private func buildPortfolioCards() -> [PortfolioCard] {
+        let active: Set<String> = ["IDEA", "PLAN", "BUILD", "REVIEW", "SHIP_READY"]
+        return products.map { p in
+            let f = docFields(type: "product", id: p.id)
+            let rp = PortfolioCard.clean(f["repo_path"])
+            var isDir: ObjCBool = false
+            let exists = !rp.isEmpty && FileManager.default.fileExists(atPath: (rp as NSString).expandingTildeInPath, isDirectory: &isDir) && isDir.boolValue
+            return PortfolioCard(
+                id: p.id, name: p.name, fields: f,
+                activeChanges: changes(for: p.id).filter { active.contains($0.status) }.count,
+                repoExists: exists
+            )
+        }
+    }
+
+    func portfolioCard(_ productId: String) -> PortfolioCard? {
+        portfolioCards.first { $0.id == productId }
     }
 
     /// 첫 실행 부트스트랩

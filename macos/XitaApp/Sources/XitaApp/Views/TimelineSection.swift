@@ -108,7 +108,8 @@ struct ReadinessGroupRow: View {
                 if parts.count >= 2 {
                     HStack(spacing: 6) {
                         Button {
-                            try? model.cycleReadinessItem(productId: productId, kind: kind, item: parts[0])
+                            do { try model.cycleReadinessItem(productId: productId, kind: kind, item: parts[0]) }
+                            catch { model.lastError = "출시 기준 항목을 바꾸지 못했습니다 — \(error)" }
                             onPatch()
                         } label: {
                             Image(systemName: statusIcon(parts[1]))

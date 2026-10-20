@@ -24,6 +24,14 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Settings").font(.title2.bold())
 
+                XCard("화면") {
+                    HStack {
+                        Text("테마").font(.caption).frame(width: 90, alignment: .leading)
+                        AppearancePicker().labelsHidden()
+                        Spacer()
+                    }
+                }
+
                 XCard("Integrations — 환경변수 기반 (토큰은 디스크에 저장하지 않음)") {
                     VStack(alignment: .leading, spacing: 6) {
                         integrationRow("GitHub", configured: env["XITA_GITHUB_TOKEN"] != nil, status: ghStatus) {

@@ -131,6 +131,13 @@ enum XUI {
     static let cardRadius: CGFloat = 10
     static let chipRadius: CGFloat = 6
 
+    /* 주의(경고) 텍스트 색 — 라이트/다크 공용
+     * 변경 전 정책: 경고 라벨에 .yellow 텍스트 사용
+     * 변경 후 정책: systemOrange 기반 토큰(XUI.caution)으로 통일
+     * 변경 이유: 노란 글자는 라이트 모드의 밝은 카드 배경에서 대비가 부족해 읽기 어렵다(테마 지원 감사)
+     * 영향 범위: 경고 텍스트 색만. 배경 tint(.yellow.opacity) 는 글자색이 primary 라 그대로 둔다 */
+    static let caution = Color(nsColor: .systemOrange)
+
     static func card<Content: View>(_ content: () -> Content) -> some View {
         content()
             .padding(pad)

@@ -14,6 +14,7 @@ struct AgentsDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("에이전트").font(.title2.bold())
+                if let err = model.lastError { Label(err, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red) }
                 XCard("이 Mac에서 쓸 수 있는 코딩 에이전트") {
                     let agents = model.availableAgents()
                     HStack(spacing: 8) {
@@ -65,7 +66,10 @@ struct AgentsDashboardView: View {
                                 Menu("상태 변경") {
                                     let order: [(String,String)] = [("WORKING","작업 중으로 전환"),("AWAITING_INPUT","나를 기다림(질문 발생)"),("RESULT_READY","결과 확인 요청"),("MERGED","반영됨(머지)"),("FAILED","실패 — 판단 필요"),("CANCELLED","취소")]
  ForEach(order, id: \.0) { pair in
-                                        Button(pair.1) { try? model.setDispatchStatus(id: d.id, status: pair.0) }
+                                        Button(pair.1) {
+                                            do { try model.setDispatchStatus(id: d.id, status: pair.0) }
+                                            catch { model.lastError = "위임 상태를 바꾸지 못했습니다 — \(error)" }
+                                        }
                                     }
                                 }
                                 .menuStyle(.borderlessButton).frame(width: 74)

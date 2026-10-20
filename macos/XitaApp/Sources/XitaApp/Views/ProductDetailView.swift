@@ -21,6 +21,7 @@ struct ProductDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+                if let err = model.lastError { Label(err, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red) }
                 Picker("", selection: $tab) {
                     Text("개요").tag(ProductTab.overview)
                     Text("보드").tag(ProductTab.board)
@@ -63,8 +64,38 @@ struct ProductDetailView: View {
                 .background(.quaternary, in: Capsule())
             if let v = model.profile(product.id)["version"] { Text(v).font(.caption).foregroundStyle(.secondary) }
             Spacer()
+            if let repo = model.portfolioCard(product.id)?.repoPath, !repo.isEmpty {
+                Button { openRepo(repo, inTerminal: false) } label: { Label("Finder에서 열기", systemImage: "folder") }
+                    .help(repo)
+                Button { openRepo(repo, inTerminal: true) } label: { Label("터미널", systemImage: "terminal") }
+                    .help(repo)
+            }
             Button("삭제", role: .destructive) { confirmDelete = true }
                 .buttonStyle(.borderless).tint(.red)
+        }
+    }
+
+    /// repo_path 폴더를 Finder 또는 터미널로 연다. 경로가 없으면 조용히 실패하지 않고 안내한다.
+    private func openRepo(_ raw: String, inTerminal: Bool) {
+        let path = (raw as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            model.lastError = "저장소 폴더를 찾을 수 없습니다 — \(path)"
+            return
+        }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        if inTerminal {
+            guard let term = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
+                model.lastError = "터미널 앱을 찾지 못했습니다"
+                return
+            }
+            NSWorkspace.shared.open([url], withApplicationAt: term, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if let error {
+                    Task { @MainActor in model.lastError = "터미널로 열지 못했습니다 — \(error.localizedDescription)" }
+                }
+            }
+        } else if !NSWorkspace.shared.open(url) {
+            model.lastError = "Finder에서 열지 못했습니다 — \(path)"
         }
     }
 
@@ -99,7 +130,6 @@ struct ProductDetailView: View {
                 }
             }
         }
-        if let err = model.lastError { Label(err, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red) }
     }
 
     private func healthChip(_ label: String, _ state: String, value: String? = nil) -> some View {
@@ -357,7 +387,10 @@ struct ProductDetailView: View {
                         Menu("우선순위") {
                             let prios: [(String,String)] = [("critical","최우선"),("high","높음"),("normal","보통"),("low","나중")]
  ForEach(prios, id: \.0) { pair in
-                                Button(pair.1) { try? model.setPriority(changeId: c.id, priority: pair.0) }
+                                Button(pair.1) {
+                                    do { try model.setPriority(changeId: c.id, priority: pair.0) }
+                                    catch { model.lastError = "우선순위를 바꾸지 못했습니다 — \(error)" }
+                                }
                             }
                         }
                         .menuStyle(.borderlessButton).frame(width: 70)
@@ -387,10 +420,10 @@ struct ProductDetailView: View {
                             Spacer()
                             Menu("이동") {
                                 ForEach(model.milestones(for: product.id)) { m in
-                                    Button(m.name) { try? model.setMilestone(changeId: c.id, milestoneId: m.milestoneId) }
+                                    Button(m.name) { trySetMilestone(model, c.id, m.milestoneId) }
                                 }
                                 Divider()
-                                Button("해제") { try? model.setMilestone(changeId: c.id, milestoneId: nil) }
+                                Button("해제") { trySetMilestone(model, c.id, nil) }
                             }
                             .frame(width: 50)
                         }
@@ -487,7 +520,10 @@ struct ProductDetailView: View {
                     Menu("상태 변경") {
                         let states: [(String,String)] = [("PLANNED","예정"),("PREPARING","준비 중"),("READY","제출 대기"),("SUBMITTED","제출됨"),("RELEASED","나갔음 ✓"),("ROLLED_BACK","되돌림")]
  ForEach(states, id: \.0) { pair in
-                            Button(pair.1) { try? model.setReleaseStatus(id: r.id, status: pair.0) }
+                            Button(pair.1) {
+                                do { try model.setReleaseStatus(id: r.id, status: pair.0) }
+                                catch { model.lastError = "출시 상태를 바꾸지 못했습니다 — \(error)" }
+                            }
                         }
                     }
                     .frame(width: 90)
@@ -587,7 +623,10 @@ struct ProductDetailView: View {
                             Text(String(body.prefix(30))).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                         }
                         Spacer()
-                        Button(XUI.termStatus(i.status)) { try? model.cycleInsightStatus(id: i.id) }
+                        Button(XUI.termStatus(i.status)) {
+                            do { try model.cycleInsightStatus(id: i.id) }
+                            catch { model.lastError = "상태를 바꾸지 못했습니다 — \(error)" }
+                        }
                             .buttonStyle(.borderless)
                             .foregroundStyle(i.status == "VALIDATED" ? Color.green : i.status == "OUTDATED" ? Color.secondary : Color.orange)
                             .help("탭: OPEN→VALIDATED→OUTDATED")
@@ -614,7 +653,10 @@ struct ProductDetailView: View {
                             if ds.count > 1 {
                                 Menu("대체…") {
                                     ForEach(active.filter { $0.id != dd.id }) { other in
-                                        Button("이걸로 대체: \(other.name)") { try? model.supersedeDecision(oldId: dd.id, newId: other.id) }
+                                        Button("이걸로 대체: \(other.name)") {
+                                            do { try model.supersedeDecision(oldId: dd.id, newId: other.id) }
+                                            catch { model.lastError = "결정을 대체하지 못했습니다 — \(error)" }
+                                        }
                                     }
                                 }
                                 .menuStyle(.borderlessButton).frame(width: 80)
@@ -723,7 +765,8 @@ struct ProductDetailView: View {
                                 Text(c.name).font(.callout)
                                 Spacer()
                                 Button(capStatusLabel(c.status)) {
-                                    try? model.cycleCapability(productId: product.id, name: c.name)
+                                    do { try model.cycleCapability(productId: product.id, name: c.name) }
+                                    catch { model.lastError = "기능 상태를 바꾸지 못했습니다 — \(error)" }
                                 }
                                 .buttonStyle(.borderless)
                                 .foregroundStyle(lane.2)

@@ -12,7 +12,9 @@ import AppKit
 /// XITA macOS — selection 기반 Human Control Plane (v0.5 §4, v0.3 §0.4).
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selection: AppModel.Selection?
+    @State private var selection: AppModel.Selection? = .home
+    /// '할 일' 섹션 펼침 상태 — 제품 수에 비례해 길어지므로 기본 접힘, 사용자가 연 상태는 보존
+    @AppStorage("xita.sidebar.tasksExpanded") private var tasksExpanded = false
     @State private var newProductName = ""
     @State private var newProductTemplate = ""
     @State private var showNewProduct = false
@@ -57,18 +59,31 @@ struct ContentView: View {
         model.items.filter { $0.type == "changes" && ["IDEA", "PLAN", "BUILD"].contains($0.status) }
     }
 
+    /* 사이드바 구조 (2026-10 내비게이션 감사)
+     * 변경 전 정책: 홈은 selection == nil 일 때만 보임(돌아갈 항목 없음) · 에이전트/없음 행은 .tag(nil) 죽은 클릭에
+     *   원시 상태코드("에이전트 RUNNING") 노출 · '할 일' 섹션 항상 펼침 · 설정이 메모함 위 무제목 섹션
+     * 변경 후 정책: 맨 위 '홈' 고정 항목(.home) · 에이전트 대기 행 → 에이전트 화면 이동, 상태는 XUI.termStatus 한국어 ·
+     *   '없음' 행은 선택 불가(tag 없음) · 제품은 portfolio 값별 그룹(없으면 기타, 보관됨은 맨 끝) ·
+     *   '할 일' 섹션 접기/펼치기(기본 접힘, 상태는 AppStorage 보존) · 메모함 다음 맨 아래 '앱' 섹션에 설정
+     * 변경 이유: 언제든 홈 복귀, 클릭하면 반드시 어딘가로 가는 행, 제품 수에 비례해 커지는 목록 제어
+     * 영향 범위: 사이드바 표시·선택만. 데이터/스키마 무변경 */
     private var sidebar: some View {
         List(selection: $selection) {
+            Section {
+                Label("홈", systemImage: "house")
+                    .tag(AppModel.Selection.home)
+            }
             Section("내가 결정할 일 (\(model.needsYouCount))") {
-                if model.conflicts.isEmpty && reviewChanges.isEmpty && model.waitingDispatches.isEmpty {
+                if model.conflicts.isEmpty && reviewChanges.isEmpty && model.waitingDispatches.isEmpty && model.pendingProposals.isEmpty {
+                    // tag 없음 = 선택 불가 행 (죽은 클릭 방지)
                     Label("없음 — 괜찮습니다", systemImage: "checkmark.circle")
-                        .foregroundStyle(.secondary).tag(Optional<AppModel.Selection>.none)
+                        .foregroundStyle(.secondary)
                 }
                 /* dispatch 대기 = "에이전트가 나를 기다린다" — 방치하면 조용히 죽는 병목 (VK Needs Attention) */
                 ForEach(model.waitingDispatches) { d in
-                    Label("에이전트 \(d.status.uppercased()): \(d.name)", systemImage: "bubble.exclamation")
+                    Label("에이전트 \(XUI.termStatus(d.status)): \(d.name)", systemImage: "bubble.exclamation")
                         .foregroundStyle(d.status.uppercased() == "AWAITING_INPUT" ? Color.red : Color.orange)
-                        .tag(Optional<AppModel.Selection>.none)
+                        .tag(AppModel.Selection.agents)
                 }
                 ForEach(model.conflicts) { c in
                     Label("어긋남: \(model.item("changes", c.targetId)?.name ?? c.targetId)", systemImage: "exclamationmark.triangle.fill")
@@ -86,17 +101,18 @@ struct ContentView: View {
                 }
             }
             Section("제품") {
-                ForEach(model.products) { p in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(p.name)
-                            Text("\(model.changes(for: p.id).count)개의 할 일")
-                                .font(.caption2).foregroundStyle(.secondary)
+                let groups = PortfolioLogic.groups(model.portfolioCards)
+                // portfolio 필드가 하나도 없으면(그룹 = 기타 1개 또는 0개) 기존처럼 평면 목록
+                if groups.isEmpty || (groups.count == 1 && groups[0].name == PortfolioLogic.otherGroup) {
+                    ForEach(model.products) { p in productRow(p) }
+                } else {
+                    ForEach(groups, id: \.name) { g in
+                        Text(g.name)
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        ForEach(g.cards) { c in
+                            if let p = model.item("products", c.id) { productRow(p) }
                         }
-                        Spacer()
-                        Text(XUI.termStatus(p.status)).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     }
-                    .tag(AppModel.Selection.product(p.id))
                 }
                 HStack {
                     TextField("+ 새 제품", text: $newProductName)
@@ -110,7 +126,7 @@ struct ContentView: View {
                     NewProductSheet(prefill: $newProductName)
                 }
             }
-            Section("할 일") {
+            Section(isExpanded: $tasksExpanded) {
                 ForEach(activeChanges) { c in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.name)
@@ -119,6 +135,8 @@ struct ContentView: View {
                     }
                     .tag(AppModel.Selection.change(c.id))
                 }
+            } header: {
+                Text("할 일 (\(activeChanges.count))")
             }
             Section("에이전트") {
                 Label("에이전트 위임 · 어긋남 감시", systemImage: "cpu")
@@ -127,10 +145,6 @@ struct ContentView: View {
                     Text(model.availableAgents().isEmpty ? "감지된 에이전트: 없음" : "감지된 에이전트: \(model.availableAgents().joined(separator: ", "))")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-            }
-            Section("") {
-                Label("설정", systemImage: "gearshape")
-                    .tag(AppModel.Selection.settings)
             }
             Section("메모함") {
                 ForEach(model.workbenchItems.filter { !["promoted", "archived"].contains($0.status) }) { w in
@@ -149,7 +163,26 @@ struct ContentView: View {
                     .tag(AppModel.Selection.workbench(w.id))
                 }
             }
+            Section("앱") {
+                Label("설정", systemImage: "gearshape")
+                    .tag(AppModel.Selection.settings)
+            }
         }
+    }
+
+    private func productRow(_ p: AppModel.Item) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(p.name)
+                Text("\(model.changes(for: p.id).count)개의 할 일")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            // 카드와 같은 기준: 운영 상태(production_status)가 있으면 그것, 없으면 문서 status
+            let status = model.portfolioCard(p.id).map(\.productionStatus).flatMap { $0.isEmpty ? nil : $0 } ?? p.status
+            Text(XUI.termStatus(status)).font(.caption2.monospaced()).foregroundStyle(.secondary)
+        }
+        .tag(AppModel.Selection.product(p.id))
     }
 
     // ---- Detail ------------------------------------------------------------
@@ -179,8 +212,8 @@ struct ContentView: View {
             AgentsDashboardView()
         case .settings:
             SettingsView()
-        case nil:
-            PortfolioSummaryView(review: reviewChanges)
+        case .home?, nil:
+            PortfolioSummaryView(review: reviewChanges, selection: $selection)
         }
     }
 }
