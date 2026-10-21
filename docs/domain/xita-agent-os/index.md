@@ -297,6 +297,28 @@ flowchart TB
 - 확장 지점은 xal의 `registerTool`·`registerProvider`·`registerCommand`·`registerHook`·`registerPrompt`와 같은 범위로 잡는다. 이 이상은 뼈대에 넣지 않는다.
 - 하네스 정의 형식(Markdown·YAML·스크립트 훅)과 위치는 결정 #9.
 
+### 9-4. CLI 개발 철학: DeepSeek Harness를 따른다 (2026-10-21 대장님 결정)
+
+출처: [github.com/deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)의 `AGENTS.md`, `docs/architecture.md`, `.agents/notes/implemented/architecture/*` (master, 2026-10-17). 문서 기준이고 소스는 직접 읽지 않았다. **저장소에 terminal-bench·SWE-bench 점수는 없다.** "성능이 가장 좋다"는 저장소로는 확인되지 않으며, 따라 할 근거는 아래 설계 원칙이다.
+
+| dsh 원칙 | 뜻 | xita 적용 | 위치 |
+| --- | --- | --- | --- |
+| Model-visible ⟺ logged | 모델에 간 요청은 로그만으로 바이트 단위 재구성 가능 | append-only 세션 이벤트 + 순수 함수 projection으로 메시지 생성 | 뼈대 |
+| 캐시 안정성은 결과로 생긴다 | 위 원칙을 지키면 prefix cache가 자동 유지 | 헤더(설정·도구 스키마)는 바뀔 때만 기록, 프롬프트 변경은 history 뒤에 append. 두 번째 요청부터 cache-read > 0 테스트 | 뼈대 |
+| Plugins, not loop changes | 새 동작은 확장 지점에만 | turn/step 이벤트 + 훅 체인(pre-step, request, request-error, tool pre/execute/post) | 뼈대 |
+| 병렬 도구 + exclusive barrier | 안전한 호출은 최대 10개 동시, 판단 불가면 exclusive | `trait Tool { concurrency() }` + tokio semaphore | 뼈대 |
+| 실패해도 짝을 맞춘다 | 취소·실패 시 도구 결과를 합성 (`TOOL_OUTCOME_UNKNOWN` 등), 결과 불확실한 작업은 자동 재시도 금지 | 루프 복구 모듈 | 뼈대 |
+| 세션 버전 = 정수 하나 | `session.vN.jsonl`, 인접 migration, 미래 버전 거부, 이벤트 추가는 `ignorable` | 세션 저장 모듈 | 뼈대 |
+| No hardcoded tunables · fails loud · explicit | 바뀌는 값은 검증되는 설정, 잘못된 설정은 바로 에러 | 설정 로더 | 뼈대 |
+| profile = bundle 층 + patch | 구성을 층으로 쌓고 row id로 교체·삽입, `--dump-config` | 하네스 정의(결정 #9)를 이 방식으로 | 뼈대(로더) / 하네스(내용) |
+| 재시도·compaction·spill·sandbox·승인 | 전부 선택형 seam | 재시도(transient 5종, 2회), compaction(80% 또는 W−출력−64k, 16% 보존), 12.5k 토큰 넘는 결과 spill | 하네스 |
+| 최소 도구 구성 | 벤치용 `sdk-minimal`: 페르소나 한 줄 + 도구 3개 | xita 기본 프로필도 최소 도구로 시작 | 하네스 |
+| PTC (`run_code`) | 도구 호출 대신 코드로 여러 도구를 묶어 실행 | 후순위 | 하네스 |
+| 문서마다 "Model Experience" | 모든 모듈이 토큰·KV 캐시 영향을 적는다 | crate README 규칙 | 프로세스 |
+
+- **따라 하지 않을 것:** dsh는 세션 로그를 DeepSeek로 업로드하는 기능이 기본으로 켜져 있다(`2026-09-14-session-log-upload-default.md`). xita는 로그를 밖으로 보내지 않는다.
+- **차이:** dsh는 TypeScript/Node + Cordis이고 "특권 core 없음"이다. xita는 Rust로 같은 경계를 crate와 trait으로 만든다. 플러그인은 동적 로딩 대신 하네스 파일(프로필·훅 실행 파일)로 갈아 끼운다.
+
 ## 저장소 구조
 
 대장님 제안: Xita 조직 + `cli`·`desktop`·`mobile` 저장소 분리, core 여부. **core를 Rust로 확정한 기준**으로 정리.
@@ -364,6 +386,7 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 날짜 | 요청 | 바뀐 곳 |
 | --- | --- | --- |
 | 2026-10-21 | 최초 생성 (자연어 명령 중심 재편, harness 조사, 저장소 분리 판단) | 전체 |
+| 2026-10-21 | CLI는 DeepSeek Harness 개발 철학을 따름 | 9-4 절 |
 | 2026-10-21 | 조직 `xita-app` 확정, 에이전트는 최소 뼈대 + 하네스 분리로 확정 | 결정 #2·#3·#3-1·#4·#4-1·#9, 9-3 절 |
 | 2026-10-21 | 저장소 3개·조직명 후보, 화면별 기술(CLI ratatui, 데스크톱 SwiftUI, 모바일 Compose) | 결정 #3·#3-1·#4·#4-1 |
 | 2026-10-21 | core를 Rust로 확정, DeepSeek Harness·OpenTUI·Rust 루프 조사 반영, 저장소 3개 안 | 9-1 표·xal 절, 자원 실측, 저장소 구조, 결정 #1·#2·#3·#3-1·#8 |
