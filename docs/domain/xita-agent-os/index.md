@@ -127,6 +127,8 @@ stateDiagram-v2
 | 자동 반영 범위 | A: 종류별 정책표 / B: 모델 확신도 임계값 / C: A+B | 작업 종류, 확신도 | 추천 A. 확신도는 모델마다 보정이 안 돼 기준으로 쓰기 어렵다 `[추정]` | 예 |
 | 승인 만료 | A: 만료 없음 / B: N시간 후 만료 | 만료 시간 | 24시간 `[가정]` | 예 |
 | 대화 → 기록 정리 시점 | A: 매 턴 / B: 대화 종료·N분 무응답 / C: 명시적 "정리해" | 대기 시간 | 추천 B+C `[가정]` | 예 |
+| xita cli 작업 정체 (`agent-stall`) | 고정 일수 | 정체 일수 | 4~14일 (15일부터는 기존 `stale`) [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] | 아니오 (기존 규칙 신호와 같이 상수) |
+| 가져온 이슈 상태 조회 | 수집마다 열린 할 일의 이슈만 | 한 번 최대 개수 | 30개, 동시 4개. GitHub 토큰 없는 한도 시간당 60회 안쪽 [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | 아니오 |
 
 주기별 하루 점검 횟수 = 24 / 주기(시간). AI 조언 호출은 신호가 바뀔 때만이라 이 값이 상한이다 [코드: apps/server/app/portfolio/monitor.ts].
 
@@ -206,6 +208,8 @@ erDiagram
 | 예외 | 모델 전부 실패 (M5 꺼짐, 쿼터 소진) | 체인 대체 → 규칙 모드 안내 [코드: apps/server/app/v4/ai_router.ts] | 2026-10-18 실측: Alibaba 쿼터 소진 시 xal 300초 대기 |
 | 예외 | 여러 화면에서 동시 수정 | 리비전·ws_rev 충돌 판정 [코드: apps/server/app/v4/revision.ts], [코드: rust/xita-core/src/operation.rs] | 코드 |
 | 예외 | 작은 로컬 모델의 tool calling 불안정 | 기록·분류는 로컬, 복잡한 계획은 z.ai, 실패 시 확인 질문 | [확인 필요] PoC |
+| 예외 | 가져온 GitHub·Linear 이슈는 닫혔는데 할 일은 IDEA·PLAN·BUILD·PAUSED | 수집 때 이슈 주소(`source_url`)로 상태를 보고 `issue-closed` 신호. 할 일은 자동으로 고치지 않는다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] | 2026-11-01 실측(GitHub 공개 이슈). Linear 실호출은 미검증 |
+| 운영 | xita cli 가 시작한 할 일(`xita_work_start`)이 마무리 없이 멈춤 | `agent-stall` 신호 (BUILD 로 4~14일) [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] | 2026-11-01 실측 |
 | 운영 | 키·로그인 만료 (opencode CLI 키 만료 확인됨) | 상태 화면에 연결 상태 표시 [코드: apps/server/public/app/ai.js] | 2026-10-18 실측 |
 | 운영 | 상시 실행: 세션 끝나면 서버도 꺼짐 | launchd 데몬으로 설치 `[미구현]` | 2026-10-21 확인(3333 응답 없음) |
 | 운영 | 모바일 원격 접속 | Tailscale 내부망 + 기기 토큰 [코드: apps/server/app/v4/devices.ts] | [확인 필요] |
@@ -319,6 +323,34 @@ flowchart TB
 - **따라 하지 않을 것:** dsh는 세션 로그를 DeepSeek로 업로드하는 기능이 기본으로 켜져 있다(`2026-09-14-session-log-upload-default.md`). xita는 로그를 밖으로 보내지 않는다.
 - **차이:** dsh는 TypeScript/Node + Cordis이고 "특권 core 없음"이다. xita는 Rust로 같은 경계를 crate와 trait으로 만든다. 플러그인은 동적 로딩 대신 하네스 파일(프로필·훅 실행 파일)로 갈아 끼운다.
 
+### 9-5. Super-agent 설계 대조 (2026-11-01)
+
+출처: DeepSeek Harness 팀 아티클 "Exploring Super-agent Design: Towards a More Autonomous Agent System" ([x.com/DeepSeekHarness/status/2116857257245987236](https://x.com/DeepSeekHarness/status/2116857257245987236), 2026-11-01, 중국어 원문의 기계 번역). dsh 기능 소개가 아니라 설계 제안이고, 실험은 합성 워크로드라 원문도 "참고용"이라고 밝힌다.
+
+글의 요지: 단일 작업의 병목은 모델이 아니라 사람의 주의력이다(동시에 따라가는 세션 3~5개). 그래서 상시 실행 Router(대화·배분만) + 격리된 Worker, 이벤트 구동(Fast/Slow 필터·Thread 구독), Inline & Spill·Chain of Recall, 비동기 도구, 채널별 말투, 연산·상태·환경 분리, 진척을 보는 Watchdog을 제안한다.
+
+```mermaid
+flowchart LR
+  E["바깥 이벤트 (스토어·AdMob·GitHub·Linear)"] --> F["규칙 신호 (코드, 비용 0)"]
+  F -->|"신호가 바뀔 때만"| A["AI 조언 (도구 없음)"]
+  F -->|"이슈 주소로 바로"| W["그 할 일 (issue-closed)"]
+  S["xita cli 세션"] -->|"xita_work_start"| W
+  W -->|"4~14일 그대로"| G["agent-stall 신호"]
+```
+
+| 원문 원칙 | XITA 현재 | 근거 | 판단 |
+| --- | --- | --- | --- |
+| Router는 실행하지 않고 Worker가 실행 | 조언 경로는 도구 없이 수치·신호만 받는다. xita cli는 헬퍼이자 자가개선 도구라 파일·셸 도구를 쓴다 | [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] `PORTFOLIO_SYSTEM`, [코드: xita-app/core/crates/xita-harness/src/lib.rs] | 적용 안 함. xita cli에서 실행 도구를 빼면 기존 기능이 깨진다 |
+| Fast/Slow 필터 | 규칙 신호를 먼저 계산하고, `signals_hash`가 같고 `advice_hours` 안이면 AI를 부르지 않는다 | [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] `run_analysis` | 이미 있음 |
+| Thread 구독·pass-through | **이번 적용.** 가져온 이슈(`source_url`)의 상태를 수집 때 주소로 조회해 그 할 일에 `issue-closed` 신호를 붙인다. AI를 거치지 않는다 | [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] `issue_state`, [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] `tracked_issues` | 적용 (e72b39e) |
+| Inline & Spill · Chain of Recall | 긴 도구 결과는 page로 빼고 `context_recall`로 다시 읽는다. 새 세션에 연결 제품 요약을 넣고, 할 일에 `agent_session`을 남긴다 | [코드: xita-app/core/crates/xita-harness/src/hooks.rs], [코드: xita-app/core/crates/xita-harness/src/work_tools.rs] | 이미 있음 |
+| 전이중 (`start`/`stop`) | `shell` background + `job_output`·`job_kill`, 끝나면 다음 메시지에 알림. TUI는 응답 중에도 steer·queue를 받는다 | [코드: xita-app/core/crates/xita-harness/src/jobs.rs], [코드: xita-app/core/crates/xita-cli/src/tui.rs] | 이미 있음 |
+| 채널별 응답 규약 | 화면(xita cli·데스크탑·웹·모바일앱)마다 말투를 나누지 않는다 | 모름 (하네스 층 결정) | 결정 #10 |
+| 연산·상태·환경 분리, BYOM | 이 맥의 `xitad` 하나가 상태를 갖고 화면들이 붙는다. 클라우드 루프는 없다 | [코드: xita-app/core/crates/xita-daemon/src/main.rs] | 적용 안 함. 1인 로컬 도구라 공격면만 늘어난다 |
+| Watchdog | 생존은 LaunchAgent `KeepAlive`. **이번 적용:** xita cli가 시작한 할 일이 BUILD로 4~14일 그대로면 `agent-stall` 신호 (15일부터는 기존 `stale`) | [코드: xita-app/core/crates/xita-daemon/src/main.rs] plist, [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] | 적용 (e72b39e) |
+| 먼저 해두기 (speculative) | 없음 | | 보류. 토큰 비용이 "AI 비용 ≤ 늘어난 수익"과 부딪친다 |
+| 자격증명은 모델이 못 보게 | 조언에 보내는 제품 요약에서 키·경로·코드를 뺀다. 연동 토큰은 응답에 싣지 않는다 | [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] `product_facts`, [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] | 이미 있음 |
+
 ## 저장소 구조
 
 대장님 제안: Xita 조직 + `cli`·`desktop`·`mobile` 저장소 분리, core 여부. **core를 Rust로 확정한 기준**으로 정리.
@@ -349,6 +381,8 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 수익·지표 연동 | O AdMob [코드: apps/server/app/portfolio/revenue.ts] | △ 확장 | | | |
 | 로컬 LLM | O | O | | O | O |
 | 되돌리기 | `[미구현]` 신규 설계 | | | | O revert |
+| 맡긴 일 진척 감시 (Watchdog) | O `agent-stall` [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] | △ heartbeat | | | |
+| 바깥 이슈 상태 → 할 일 연결 | △ 닫힘만 신호 (자동 변경 없음) [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] | | O GitHub 연동 `[추정]` | | |
 
 누락 후보: 침묵 규약, 장기 메모리, 메신저 연동 → 결정 목록 #6에 반영. 승인 게이트를 1급 기능으로 둔 제품이 없고 AdMob 연동 사례도 못 찾았다. 이 둘이 차별점이다.
 
@@ -367,6 +401,8 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 9 | 하네스 정의 형식 | A: Markdown 규칙 + YAML 정책 + 실행 파일 훅 (Claude Code 방식) / B: WASM 플러그인 / C: Lua 등 내장 스크립트 | **A로 시작** `[가정]`. 대장님이 이미 쓰는 CLAUDE.md·skills 구조를 그대로 옮길 수 있다 | 중간 |
 | 5 | 자동 반영 범위 (정책표) | A: 기록성 전부 자동 / B: 전부 확인 / C: 종류별 표 | **C.** 아이디어·메모·상태 이동은 자동 + 되돌리기, 배포·게시·삭제·외부 전송은 승인 | 낮음 |
 | 6 | 누락 후보 채택 | 침묵 규약 / 장기 메모리 / 텔레그램 연동 | 침묵 규약은 바로 채택(조언 피로 방지). 메모리는 대화 요약으로 시작. 메신저는 모바일 앱 이후 | 낮음 |
+| 10 | 화면별 응답 규약 (9-5) | A: 하네스 파일(`~/.xita/harness`)에 규칙으로 / B: 코어가 실행 환경에 화면 이름을 넣고 기본 규칙 내장 / C: 두지 않음 | **A** `[가정]`. 말투는 하네스 층 몫이고, B는 모든 새 세션의 system을 바꿔 기존 동작이 달라진다. 모바일 알림이 생기면 "결정이 필요할 때만, 100단어 이하"(원문 실측 규칙)로 시작 | 낮음 |
+| 11 | 닫힌 이슈의 할 일을 자동으로 옮길까 | A: 신호만 (현행) / B: REVIEW로 자동 이동 + 되돌리기 | **A.** 이슈가 닫혀도 실제 작업이 끝났는지는 사람이 본다. 자동 이동은 결정 #5 정책표에 넣을 때 다시 본다 | 낮음 |
 | 7 | XITA를 제품으로 팔 것인가 | A: 개인 도구 / B: 오픈소스 / C: 유료 | **A로 시작** `[가정]`. 팔 생각이 있으면 #3을 C로, 라이선스를 먼저 정한다 | 중간 |
 | 8 | 배포 형태 | A: Homebrew tap + launchd 데몬 / B: 직접 설치 스크립트 | **A.** `xita`(CLI)·`xitad`(게이트웨이) Rust 실행 파일. Node 24 의존이 사라진다 | 낮음 |
 
@@ -375,6 +411,7 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 기준 commit | 날짜 | 읽은 소스 |
 | --- | --- | --- |
 | 77b38e1 (+ 미커밋 변경 62개) | 2026-10-21 | apps/server/app/v4/, apps/server/app/portfolio/, apps/server/start/routes.ts, apps/cli/, rust/xita-core/src/, macos/XitaApp/Package.swift, apps/mobile/src/api/ |
+| xita-app/core e72b39e (9-5 절만) | 2026-11-01 | crates/xita-daemon/src/portfolio/ (advice·integrations·mod), crates/xita-daemon/src/main.rs, crates/xita-harness/src/ (jobs·hooks·work_tools·lib), crates/xita-cli/src/tui.rs |
 
 ## 다음 단계
 
@@ -390,3 +427,4 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 2026-10-21 | 조직 `xita-app` 확정, 에이전트는 최소 뼈대 + 하네스 분리로 확정 | 결정 #2·#3·#3-1·#4·#4-1·#9, 9-3 절 |
 | 2026-10-21 | 저장소 3개·조직명 후보, 화면별 기술(CLI ratatui, 데스크톱 SwiftUI, 모바일 Compose) | 결정 #3·#3-1·#4·#4-1 |
 | 2026-10-21 | core를 Rust로 확정, DeepSeek Harness·OpenTUI·Rust 루프 조사 반영, 저장소 3개 안 | 9-1 표·xal 절, 자원 실측, 저장소 구조, 결정 #1·#2·#3·#3-1·#8 |
+| 2026-11-01 | DeepSeek Harness Super-agent 설계 대조, 진척 감시(`agent-stall`)·닫힌 이슈(`issue-closed`) 신호 적용 | 9-5 절, 4 숫자 규칙, 6~8 표, 레퍼런스 대조, 결정 #10·#11, 코드 기준, workflow.html `monitor` 단계 |
