@@ -454,9 +454,10 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 - 남은 일 (2026-11-01 코드 기준, 정본은 [코드: xita-app/core/AGENTS.md] "남은 일"):
   1. 정책표(결정 #5)와 Operation 상태기계 — 지금은 journal + SHIPPED 상수
   2. TS 서버에만 있던 홍보 초안·기획 위저드·planner import·배포(빌드·업로드) 중 필요한 것 이전
-  3. `xita-domain`과 `xita-ws` 합치기 (전이표·이벤트 필드명 중복 해소)
+  3. `xita-domain`과 `xita-ws` 합치기 (전이표·이벤트 필드명 중복 해소). 1의 전이표와 같이 한다
   4. xita 모바일앱 (결정 #4-1): xitad에 붙는 클라이언트와 기기 토큰
-  5. 모델 체인 대체·민감도 라우팅 (결정 #1 이전 TS 서버에 있던 것)
+  5. 모델 체인 대체·민감도 라우팅 (결정 #1 이전 TS 서버에 있던 것). 커널 루프에서 할지 하네스 턴 단위로 할지 먼저 정한다 (설계 원칙 6·11)
+- 2026-11-02 끝낸 것: xita cli 제품 추가·기본 필드 수정·인사이트 상태 도구(`xita_product_add`·`xita_product_edit`·`xita_insight_set`, 연동 키·보관·출시 완료는 제외) [코드: xita-app/core/crates/xita-domain/src/records.rs], 세션을 연 화면이 모두 닫을 때만 데몬이 세션을 거두고 xita 데스크탑이 대화 전환·종료 때 close를 보냄 [코드: xita-app/core/crates/xita-daemon/src/main.rs] `close`
 - 드릴다운 후보: Operation 정책표, 대화 → 기록 정리 규칙, 게이트웨이 프로토콜(OpenAPI).
 
 ## 변경 이력
@@ -469,4 +470,5 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 2026-10-21 | 저장소 3개·조직명 후보, 화면별 기술(CLI ratatui, 데스크톱 SwiftUI, 모바일 Compose) | 결정 #3·#3-1·#4·#4-1 |
 | 2026-10-21 | core를 Rust로 확정, DeepSeek Harness·OpenTUI·Rust 루프 조사 반영, 저장소 3개 안 | 9-1 표·xal 절, 자원 실측, 저장소 구조, 결정 #1·#2·#3·#3-1·#8 |
 | 2026-11-01 | 코드 동기화 (xita-app/core 2ce7655 · desktop 3f37c7f): 옛 TS·rust/xita-core 경로를 현행 Rust 코드로 교체, 구현된 것(xitad·LaunchAgent·brew cask·journal 되돌리기·메모리·하네스 TOML·HTTP 연결·Play 판매) 반영, 없는 것(Operation 상태기계·정책표·Approval 만료·모델 체인·민감도 라우팅·배포 도구·xita 모바일앱·기기 토큰) `[미구현]` 표시, Rust 데몬 메모리 실측 | 머리말·한눈 지도·렌즈 표·1~3절·4 숫자 규칙·5 돈 흐름·데이터 모델·6~8 표·9-1~9-4·저장소 구조·레퍼런스 대조·결정 #1~#9·코드 기준·다음 단계, workflow.html 엔티티·위험·설명 |
+| 2026-11-02 | 바로 구현 가능한 남은 일 반영 (core 4d16f71 · desktop 6f5b992) | 다음 단계 |
 | 2026-11-01 | DeepSeek Harness Super-agent 설계 대조, 진척 감시(`agent-stall`)·닫힌 이슈(`issue-closed`) 신호 적용 | 9-5 절, 4 숫자 규칙, 6~8 표, 레퍼런스 대조, 결정 #10·#11, 코드 기준, workflow.html `monitor` 단계 |
