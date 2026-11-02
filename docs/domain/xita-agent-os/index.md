@@ -46,7 +46,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | 1. 주체 | 대장님(유일한 사람), 에이전트, 코어, 외부 실행 대상(Play·AdMob·커뮤니티), LLM 제공사, 코딩 에이전트(opencode·codex·claude code·qwen-code) | 높음 | [코드: xita-app/core/crates/xita-ws/src/agent.rs] |
 | 2. 핵심 루프 | 말한다 → 기록·실행된다 → 대시보드로 확인 → 조언을 받는다 → 다시 말한다 | 높음 | [코드: xita-app/core/crates/xita-harness/src/work_tools.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] |
-| 3. 상태 수명주기 | Operation(신규, `[미구현]`) + Change 상태(IDEA→PLAN→BUILD→REVIEW→SHIP_READY→SHIPPED) | 높음 | [코드: xita-app/core/crates/xita-domain/src/work.rs] |
+| 3. 상태 수명주기 | 승인 요청(proposal kind ACTION: pending→approved→applied·failed·running / rejected / expired) + Change 상태(IDEA→PLAN→BUILD→REVIEW→SHIP_READY→SHIPPED) | 높음 | [코드: xita-app/core/crates/xita-domain/src/work.rs] |
 | 4. 숫자 규칙 | 수집 주기, 재시도, 승인 만료, 자동 반영 기준, 신호 기준값 | 중간 | [코드: xita-app/core/crates/xita-harness/src/config.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] |
 | 5. 돈 흐름 | 들어옴: AdMob, Play 판매 보고서, 수동 판매 입력. 나감: LLM 구독·토큰, M5 전기, 스토어 수수료 | 중간 | [코드: xita-app/core/crates/xita-daemon/src/portfolio/revenue.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/sales.rs] |
 | 6. 예외·어뷰징 | 잘못 알아들음, 프롬프트 주입(홍보 댓글·웹 내용), 모델 전부 실패, 외부 실행 실패, 동시 수정 | 낮음 | 아래 표 |
@@ -77,7 +77,7 @@ sequenceDiagram
 
 - **사람은 대장님 한 명.** 권한·멀티 테넌트는 필요 없다. 데몬 인증은 `$XITA_HOME/daemon.token` Bearer 하나다 [코드: xita-app/core/crates/xita-daemon/src/main.rs]. "기기"는 동기화 요청의 `DeviceIdentity`(맥·iOS·안드로이드)로만 있고, 기기별 토큰은 `[미구현]` [코드: xita-app/core/crates/xita-ws/src/sync.rs].
 - **코딩 에이전트는 별도 주체로 유지.** handoff 마크다운을 만들어 opencode·codex·claude code·qwen-code에 넘긴다(실행은 opt-in) [코드: xita-app/core/crates/xita-ws/src/agent.rs]. xita cli 자신도 `xita_work_start`로 handoff를 받아 일하고 `xita_work_finish`로 마친다 [코드: xita-app/core/crates/xita-harness/src/work_tools.rs].
-- 위 그림의 Play 업로드 같은 배포·게시 실행은 `[미구현]`이다. TS 서버에서 옮기지 않았다 [코드: xita-app/core/AGENTS.md].
+- Play 업로드(배포)는 2026-11-02 옮겼다. 에이전트 요청은 승인 뒤 데몬이 실행한다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/deploy.rs]. 홍보 게시는 아직 없다 `[미구현]`.
 
 ## 2. 핵심 루프
 
@@ -92,7 +92,7 @@ flowchart LR
 
 ## 3. 상태 수명주기
 
-신규 핵심 객체 **Operation(작업 요청)** `[미구현]`. 에이전트가 하는 모든 변경은 이걸 거친다. 그래야 되돌리기·감사·승인이 한 곳에 모인다.
+신규 핵심 객체 **Operation(작업 요청)**. 2026-11-02 구현은 둘로 나뉜다: 바로 쓰는 기록은 journal(되돌리기), 승인이 필요한 일(정책표)은 승인 요청 문서(`proposals` kind ACTION)가 상태기계다 [코드: xita-app/core/crates/xita-domain/src/approvals.rs]. 하나의 Operation 객체로 합치는 일은 `[미구현]`.
 
 ```mermaid
 stateDiagram-v2
@@ -135,16 +135,17 @@ stateDiagram-v2
 
 Change 수명주기: IDEA·PLAN·BUILD·REVIEW·SHIP_READY·SHIPPED·PAUSED·CANCELLED [코드: xita-app/core/crates/xita-domain/src/work.rs]. SHIPPED·CANCELLED가 끝 상태다. 같은 전이표가 `xita-domain`과 `xita-ws`에 따로 있다 [코드: xita-app/core/crates/xita-ws/src/lifecycle.rs].
 - SHIPPED: 에이전트는 못 옮긴다(오류 "소유자 승인 필요"). 사람은 xita 데스크탑에서 REVIEW·SHIP_READY일 때 `POST /v1/ws/changes/{id}/approve`로 승인한다 [코드: xita-app/core/crates/xita-ws/src/operation.rs], [코드: xita-app/core/crates/xita-daemon/src/ws.rs].
-- Proposal은 문서 종류(`proposals/`)로만 남아 있다. Approval 객체와 만료는 `[미구현]` [코드: xita-app/core/crates/xita-domain/src/store.rs].
+- 승인 요청은 `proposals/` 문서(kind ACTION, `action`·`target`·`params`·`expires_ms`)이고, 만료는 24시간(`[approval] expire_hours`) [코드: xita-app/core/crates/xita-domain/src/approvals.rs].
 
 ## 4. 숫자 규칙
 
 | 규칙 | 공식 후보 | 파라미터 | 기준값 | 설정값화 |
 | --- | --- | --- | --- | --- |
 | 수집·조언 주기 | A: 고정 N시간 / B: 신호 있을 때만 알림(침묵 규약) | `config.toml [portfolio] refresh_hours`, `advice_hours` | 수집 6시간(0이면 끔), 신호가 그대로면 24시간 안에는 AI 조언을 다시 받지 않음 [코드: xita-app/core/crates/xita-harness/src/config.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs]. OpenClaw heartbeat 기본 30분 ([docs.openclaw.ai/gateway/heartbeat](https://docs.openclaw.ai/gateway/heartbeat)) | 예 (구현) |
-| 모델 실패 대기 | A: 고정 cooldown / B: 지수 백오프 | `[retry] attempts·base_ms·max_ms·jitter` | B 구현: 2회, 500ms→최대 10초, jitter 0.1, `Retry-After` 우선, 일시 오류 5종만. 다음 모델로 넘기는 체인은 `[미구현]` [코드: xita-app/core/crates/xita-harness/src/config.rs], [코드: xita-app/core/crates/xita-harness/src/hooks.rs] | 예 (구현) |
-| 자동 반영 범위 | A: 종류별 정책표 / B: 모델 확신도 임계값 / C: A+B | 작업 종류, 확신도 | 추천 A. 확신도는 모델마다 보정이 안 돼 기준으로 쓰기 어렵다 `[추정]`. 지금은 상수 `NEEDS_APPROVAL = ["SHIPPED"]` 하나 [코드: xita-app/core/crates/xita-domain/src/work.rs] | 아니오 (`[미구현]`) |
-| 승인 만료 | A: 만료 없음 / B: N시간 후 만료 | 만료 시간 | 24시간 `[가정]`. 코드에는 만료가 없다 `[미구현]` | 예 |
+| 모델 실패 대기 | A: 고정 cooldown / B: 지수 백오프 | `[retry] attempts·base_ms·max_ms·jitter` | B 구현: 2회, 500ms→최대 10초, jitter 0.1, `Retry-After` 우선, 일시 오류 5종만. 그래도 실패한 턴은 `[fallback] chain` 의 다음 모델로 이어서 돌린다(결정 D4, 하네스 턴 단위, 기본 빈 목록) [코드: xita-app/core/crates/xita-harness/src/config.rs], [코드: xita-app/core/crates/xita-harness/src/lib.rs] `fall_back` | 예 (구현) |
+| 자동 반영 범위 | A: 종류별 정책표 / B: 모델 확신도 임계값 / C: A+B | 작업 종류, 확신도 | A 구현: `[approval] require = ["work.ship", "release.complete", "deploy"]`, 나머지 기록은 바로 쓰고 `xita_undo` [코드: xita-app/core/crates/xita-domain/src/approvals.rs] | 예 (구현) |
+| 승인 만료 | A: 만료 없음 / B: N시간 후 만료 | 만료 시간 | B 구현: `[approval] expire_hours = 24`, 데몬이 30초마다 만료 처리 [코드: xita-app/core/crates/xita-daemon/src/approvals.rs] | 예 (구현) |
+| 모델 창 크기 | A: provider 공통값 / B: 모델별 최대 | 모델별 컨텍스트 | B 구현 (2026-11-02 대장님 요청): models.dev `limit.context` — 같은 provider → 이름이 이어지는 provider → 과반 값, 없으면 공통값. `/context-window` 가 마지막에 덮는다 [코드: xita-app/core/crates/xita-harness/src/model_limits.rs] | 예 (구현) |
 | 대화 → 기록 정리 시점 | A: 매 턴 / B: 대화 종료·N분 무응답 / C: 명시적 "정리해" | 대기 시간 | 추천 B+C `[가정]` | 예 |
 | 루프·컨텍스트 설정값 | 설정 | `max_parallel`, `max_steps`, `[spill] max_inline_chars`, `[context] retain_ratio`, `[memory] index_max_chars`, `[product] brief_items` | 10, 0(무제한), 50,000자, 0.16, 25,000자, 15 [코드: xita-app/core/crates/xita-harness/src/config.rs] | 예 (구현) |
 | xita cli 작업 정체 (`agent-stall`) | 고정 일수 | 정체 일수 | 4~14일 (15일부터는 기존 `stale`) [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] | 아니오 (기존 규칙 신호와 같이 상수) |
@@ -213,11 +214,11 @@ erDiagram
 | 엔티티 | 저장 위치 | 만드는 단계 | 바꾸는 단계 | 민감 필드 |
 | --- | --- | --- | --- | --- |
 | Session (계획의 Conversation) | `$XITA_HOME/sessions/<id>/session.v1.jsonl` (append-only). 할 일의 `agent_session`으로 연결 [코드: xita-app/core/crates/xita-session/src/lib.rs] | say | 매 턴 | 대화 원문(수익·키가 섞일 수 있음). 밖으로 보내지 않는다 |
-| Operation `[미구현]` | 지금은 journal `.xita/agent-ops.jsonl` (op_id·before·undone) [코드: xita-app/core/crates/xita-domain/src/journal.rs] | propose, monitor | apply, exec, undo | 이전 내용 원문 |
+| Operation (journal + 승인 요청) | journal `.xita/agent-ops.jsonl` (op_id·before·undone) [코드: xita-app/core/crates/xita-domain/src/journal.rs] | propose, monitor | apply, exec, undo | 이전 내용 원문 |
 | Product | `~/.xita-workspace/products` [코드: xita-app/core/crates/xita-domain/src/store.rs] | 기획 확정 | apply | 없음 |
 | Change | `changes` (`agent_session`·`source_url` 포함) [코드: xita-app/core/crates/xita-domain/src/work.rs] | apply | apply, undo | 없음 |
 | 그 밖의 기록 | `decisions`·`insights`·`milestones`·`releases`·`capabilities`·`readiness`·`workbench`(메모)·`reviews`·`references`·`dispatches`·`patches`·`artifacts` [코드: xita-app/core/crates/xita-domain/src/store.rs] | xita_* 도구, xita 데스크탑 | 같음 | 없음 |
-| Approval `[미구현]` (Proposal 문서만 있음) | `proposals` [코드: xita-app/core/crates/xita-domain/src/store.rs] | ask | approve, reject | 없음 |
+| Approval (proposal kind ACTION) | `proposals` [코드: xita-app/core/crates/xita-domain/src/approvals.rs] | ask | approve, reject, expire, apply | 결과 메모 |
 | Event | `.xita/events.jsonl` (에이전트는 `eventType`, xita-ws는 `event_type` — 필드명이 둘) [코드: xita-app/core/crates/xita-domain/src/store.rs], [코드: xita-app/core/crates/xita-ws/src/operation.rs] | 모든 변경 | 없음(추가만) | 없음 |
 | Metric | `monitor/facts.json`(수집 캐시, `issues` 포함)·`revenue/` [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | monitor | monitor | 수익 (조언에는 수치만, 키·경로·코드는 빼고 보낸다) |
 
@@ -227,7 +228,7 @@ erDiagram
 | --- | --- | --- | --- |
 | 예외 | 잘못 알아들어 엉뚱한 프로젝트에 기록 | 쓰기마다 journal, `xita_undo`로 되돌리기 + 한 줄 보고(`op_id`) [코드: xita-app/core/crates/xita-domain/src/journal.rs] | 코드 |
 | 예외 | 프롬프트 주입: 홍보 댓글·웹 페이지·커밋 메시지 속 지시 | 외부 텍스트는 데이터로만 다루고, 외부 작업은 항상 승인. 지금: 조언 경로는 도구 없이 수치만 받는다. 대화 경로 도구 모드 기본값은 `auto`(묻지 않음) [코드: xita-app/core/crates/xita-harness/src/config.rs] | [확인 필요] |
-| 예외 | 모델 전부 실패 (M5 꺼짐, 쿼터 소진) | 계획: 체인 대체 → 규칙 모드. 지금: 대화는 재시도 뒤 오류, 조언만 규칙 신호로 대체(`source: "rule"`). 체인 대체 `[미구현]` [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | 2026-10-18 실측: Alibaba 쿼터 소진 시 xal 300초 대기 |
+| 예외 | 모델 전부 실패 (M5 꺼짐, 쿼터 소진) | 계획: 체인 대체 → 규칙 모드. 지금: 대화는 재시도 뒤 `[fallback] chain` 으로 이어 가고(빈 목록이면 오류), 기획 위저드도 같은 체인 뒤 기본 질문, 조언은 규칙 신호로 대체(`source: "rule"`) [코드: xita-app/core/crates/xita-harness/src/lib.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | 2026-10-18 실측: Alibaba 쿼터 소진 시 xal 300초 대기 |
 | 예외 | 여러 화면에서 동시 수정 | 문서 `revision`, `.xita/workspace.lock`(xita-domain·xita-ws 공용), 충돌은 `.xita/conflicts.jsonl` [코드: xita-app/core/crates/xita-ws/src/operation.rs] | 코드 |
 | 예외 | 작은 로컬 모델의 tool calling 불안정 | 기록·분류는 로컬, 복잡한 계획은 z.ai, 실패 시 확인 질문 | [확인 필요] PoC |
 | 예외 | 가져온 GitHub·Linear 이슈는 닫혔는데 할 일은 IDEA·PLAN·BUILD·PAUSED | 수집 때 이슈 주소(`source_url`)로 상태를 보고 `issue-closed` 신호. 할 일은 자동으로 고치지 않는다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] | 2026-11-01 실측(GitHub 공개 이슈). Linear 실호출은 미검증 |
@@ -407,7 +408,7 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 대화 → 기록 자동 정리 | O (신규) | △ 세션·메모리 | O | △ | △ 세션 요약 |
 | 상태 대시보드 | O xita 데스크탑·xita 웹 [코드: xita-app/desktop/Sources/XitaManage], [코드: xita-app/core/crates/xita-daemon/web/app.js] | △ | O Pulse | O | |
 | 여러 화면이 한 서버 공유 | O xitad [코드: xita-app/core/crates/xita-daemon/src/main.rs] | O | O | △ | O |
-| 위험 작업 승인 게이트 | △ SHIPPED 승인·도구 모드만, 정책표 `[미구현]` [코드: xita-app/core/crates/xita-harness/src/permissions.rs] | △ 도구 정책 | △ | | O 권한 요청 |
+| 위험 작업 승인 게이트 | O 정책표 `[approval]` + 승인 대기열(만료 24시간) [코드: xita-app/core/crates/xita-daemon/src/approvals.rs] | △ 도구 정책 | △ | | O 권한 요청 |
 | 주기 점검·먼저 알림 | O [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | O heartbeat | O Pulse | | |
 | 침묵 규약 (알릴 게 없으면 조용) | △ 신호가 같으면 AI를 다시 부르지 않음, 알림 규약은 `[미구현]` | O `NO_REPLY` | | | |
 | 메모리 (선호·맥락 장기 기억) | O `memory_*` 도구 [코드: xita-app/core/crates/xita-harness/src/memory.rs] | O | | | △ |
@@ -433,7 +434,7 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 4 | 데스크톱 기술 | A: SwiftUI/AppKit (현행) / B: Tauri 2 (Rust + WebView) / C: GPUI·egui·iced (순수 Rust GUI) | **확정: A.** 맥에서는 시스템 프레임워크를 쓰는 네이티브가 가장 가볍다: 현 XITA.app 번들 3.6MB, 실행 시 RSS 150MB(공유 프레임워크 포함) 실측. B는 WebView 프로세스가 추가되고, C는 채팅·마크다운·한글 입력·접근성 성숙도가 낮다 `[추정]`. 메뉴바·알림·키체인·`SMAppService`로 데몬 등록까지 네이티브로 처리. 윈도·리눅스가 필요해지면 B. 2026-11-01: 구현됨, 데몬 등록은 `SMAppService` 대신 앱이 `xitad install` 호출 | 중간 |
 | 4-1 | 모바일 기술 | A: Expo (현행) / B: Kotlin Compose 네이티브 (안드로이드) | **확정: B.** 역할이 상태·승인·채팅뿐인 얇은 창이라 네이티브가 가장 가볍고 빠르다. 대장님 기기가 갤럭시라 안드로이드 우선. 전환 전까지 Expo 유지. 2026-11-01: 미착수 `[미구현]`, Expo 앱은 옛 TS 서버에만 붙는다 | 낮음 |
 | 9 | 하네스 정의 형식 | A: Markdown 규칙 + YAML 정책 + 실행 파일 훅 (Claude Code 방식) / B: WASM 플러그인 / C: Lua 등 내장 스크립트 | **A, 구현됨** (정책은 TOML). 대장님이 이미 쓰는 CLAUDE.md·skills 구조를 그대로 옮길 수 있다 (9-3) | 중간 |
-| 5 | 자동 반영 범위 (정책표) | A: 기록성 전부 자동 / B: 전부 확인 / C: 종류별 표 | **C.** 아이디어·메모·상태 이동은 자동 + 되돌리기, 배포·게시·삭제·외부 전송은 승인. 2026-11-01: 기록성 자동 + `xita_undo`, SHIPPED 상수 차단만 있고 표는 `[미구현]` (배포·게시 도구도 없음) | 낮음 |
+| 5 | 자동 반영 범위 (정책표) | A: 기록성 전부 자동 / B: 전부 확인 / C: 종류별 표 | **확정: C (2026-11-02 대장님, 초안대로), 구현됨.** 기록은 자동 + `xita_undo`, 출시(work.ship)·출시 완료·배포는 승인 요청(`proposals` kind ACTION) → xita 데스크탑 홈·xita 웹 "승인"에서 승인하면 데몬이 실행, 24시간 뒤 만료. 홍보 게시·삭제·외부 전송은 도구가 생길 때 표에 넣는다 | 낮음 |
 | 6 | 누락 후보 채택 | 침묵 규약 / 장기 메모리 / 텔레그램 연동 | 침묵 규약은 바로 채택(조언 피로 방지). 메모리는 대화 요약으로 시작. 메신저는 모바일 앱 이후. 2026-11-01: 메모리는 대화 요약이 아니라 `memory_*` 도구로 구현, 침묵은 부분, 메신저 없음 | 낮음 |
 | 10 | 화면별 응답 규약 (9-5) | A: 하네스 파일(`~/.xita/harness`)에 규칙으로 / B: 코어가 실행 환경에 화면 이름을 넣고 기본 규칙 내장 / C: 두지 않음 | **A** `[가정]`. 말투는 하네스 층 몫이고, B는 모든 새 세션의 system을 바꿔 기존 동작이 달라진다. 모바일 알림이 생기면 "결정이 필요할 때만, 100단어 이하"(원문 실측 규칙)로 시작 | 낮음 |
 | 11 | 닫힌 이슈의 할 일을 자동으로 옮길까 | A: 신호만 (현행) / B: REVIEW로 자동 이동 + 되돌리기 | **A.** 이슈가 닫혀도 실제 작업이 끝났는지는 사람이 본다. 자동 이동은 결정 #5 정책표에 넣을 때 다시 본다 | 낮음 |
@@ -451,12 +452,13 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 ## 다음 단계
 
 - 2026-10-21 계획(TS 상시 실행 → Rust `xitad` 골격 → ratatui CLI → TS 기능 이전 → 데스크톱 연결)은 대부분 끝났다. 처음 계획에 있던 Operation·정책표는 아직 없다.
-- 남은 일 (2026-11-01 코드 기준, 정본은 [코드: xita-app/core/AGENTS.md] "남은 일"):
-  1. 정책표(결정 #5)와 Operation 상태기계 — 지금은 journal + SHIPPED 상수
-  2. TS 서버에만 있던 홍보 초안·기획 위저드·planner import·배포(빌드·업로드) 중 필요한 것 이전
-  3. `xita-domain`과 `xita-ws` 합치기 (전이표·이벤트 필드명 중복 해소). 1의 전이표와 같이 한다
-  4. xita 모바일앱 (결정 #4-1): xitad에 붙는 클라이언트와 기기 토큰
-  5. 모델 체인 대체·민감도 라우팅 (결정 #1 이전 TS 서버에 있던 것). 커널 루프에서 할지 하네스 턴 단위로 할지 먼저 정한다 (설계 원칙 6·11)
+- 남은 일 (2026-11-02 코드 기준, 정본은 [코드: xita-app/core/AGENTS.md] "남은 일"):
+  1. 홍보 게시·삭제·외부 전송 도구가 생기면 정책표(`approvals::ACTIONS`)에 넣기. 배포·기획 화면을 xita 데스크탑에도 둘지
+  2. TS 서버에만 남은 홍보 초안·planner import
+  3. `xita-domain`과 `xita-ws` 합치기 (`/v1/ws/op` 가 `a: b` 값을 따옴표 없이 써서 xita-domain 이 못 읽는 차이 포함)
+  4. xita 모바일앱 (결정 #4-1): xitad에 붙는 클라이언트와 기기 토큰. 승인 화면은 `/v1/approvals` 를 쓴다
+  5. 민감도 라우팅. 모델 대체 체인은 Runner 턴에만 있다 (서브에이전트·조언 제외)
+- 2026-11-02 결정 D1(정책표 초안대로)·D2(배포 + 기획 위저드 이전)·D4(하네스 턴 단위 모델 대체) 구현: 승인 대기열 `/v1/approvals` [코드: xita-app/core/crates/xita-daemon/src/approvals.rs], 배포 `/v1/deploy` [코드: xita-app/core/crates/xita-daemon/src/portfolio/deploy.rs], 기획 위저드 `/v1/plans` [코드: xita-app/core/crates/xita-daemon/src/planning.rs], 모델 대체 `[fallback]`, 모델별 최대 창 [코드: xita-app/core/crates/xita-harness/src/model_limits.rs]. 화면: xita 웹 승인·배포 탭·기획, xita 데스크탑 홈 승인.
 - 2026-11-02 끝낸 것: xita cli 제품 추가·기본 필드 수정·인사이트 상태 도구(`xita_product_add`·`xita_product_edit`·`xita_insight_set`, 연동 키·보관·출시 완료는 제외) [코드: xita-app/core/crates/xita-domain/src/records.rs], 세션을 연 화면이 모두 닫을 때만 데몬이 세션을 거두고 xita 데스크탑이 대화 전환·종료 때 close를 보냄 [코드: xita-app/core/crates/xita-daemon/src/main.rs] `close`
 - 드릴다운 후보: Operation 정책표, 대화 → 기록 정리 규칙, 게이트웨이 프로토콜(OpenAPI).
 
@@ -472,3 +474,4 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 2026-11-01 | 코드 동기화 (xita-app/core 2ce7655 · desktop 3f37c7f): 옛 TS·rust/xita-core 경로를 현행 Rust 코드로 교체, 구현된 것(xitad·LaunchAgent·brew cask·journal 되돌리기·메모리·하네스 TOML·HTTP 연결·Play 판매) 반영, 없는 것(Operation 상태기계·정책표·Approval 만료·모델 체인·민감도 라우팅·배포 도구·xita 모바일앱·기기 토큰) `[미구현]` 표시, Rust 데몬 메모리 실측 | 머리말·한눈 지도·렌즈 표·1~3절·4 숫자 규칙·5 돈 흐름·데이터 모델·6~8 표·9-1~9-4·저장소 구조·레퍼런스 대조·결정 #1~#9·코드 기준·다음 단계, workflow.html 엔티티·위험·설명 |
 | 2026-11-01 | DeepSeek Harness Super-agent 설계 대조, 진척 감시(`agent-stall`)·닫힌 이슈(`issue-closed`) 신호 적용 | 9-5 절, 4 숫자 규칙, 6~8 표, 레퍼런스 대조, 결정 #10·#11, 코드 기준, workflow.html `monitor` 단계 |
 | 2026-11-02 | 바로 구현 가능한 남은 일 반영 (core 4d16f71 · desktop 6f5b992) | 다음 단계 |
+| 2026-11-02 | D1·D2·D4 확정과 구현, 모델별 최대 컨텍스트 | 4 숫자 규칙(재시도·자동 반영·승인 만료·모델 창), 결정 #5, 다음 단계 |
