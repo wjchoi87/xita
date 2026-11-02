@@ -88,6 +88,7 @@ flowchart LR
 
 - 지금 코드의 한 바퀴: 말한다 → `xita_*` 도구가 workspace에 바로 쓰고 `op_id` 한 줄 보고 → xita 데스크탑이 같은 workspace를 보여 준다 → 데몬이 수집·규칙 신호·조언을 만든다 [코드: xita-app/core/crates/xita-harness/src/work_tools.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs].
 - 첫 바퀴: 설치 직후 "내 프로젝트 보여줘" 한 마디로 현황이 나와야 한다. planner import는 옛 TS 서버에만 있고 옮기지 않았다 `[미구현]` [코드: xita-app/core/AGENTS.md].
+- 할 일 진행 (2026-11-02): xita 데스크탑·xita 웹 '작업 시작' → 모델·effort 고르기 → xitad 가 PTY 에서 `xita chat -p -m -e "/work <id>"` 를 띄운다 → 제품 화면 '만드는 중'·'작업 보드'에서 그 터미널을 앱 안에서 본다. 실행 목록은 `$XITA_HOME/runs.json` 에 남아 데몬이 다시 떠도 할 일의 `agent_session` 으로 이어 간다 [코드: xita-app/core/crates/xita-daemon/src/runs.rs], [코드: xita-app/desktop/Sources/XitaManage/Views/WorkRuns.swift].
 - 다시 오는 이유: `refresh_hours`(기본 6시간) 수집 뒤의 조언과 규칙 신호 [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs].
 
 ## 3. 상태 수명주기
@@ -177,6 +178,7 @@ AdMob,"대장님 수익",10
 
 - **XITA 자체는 돈을 벌지 않는다** `[가정]`. 그래서 핵심 숫자는 "AI 비용 ≤ 늘어난 수익"이다. 옛 TS 서버에는 무료·로컬 우선 라우팅이 있었지만 [코드: apps/server/app/v4/ai_router.ts], 현행 코드에는 비용·민감도 기준 자동 라우팅이 없다 `[미구현]`. 조언 모델은 `advice_provider`로 고르고, 토큰 가격은 `pricing.rs`가 계산한다 [코드: xita-app/core/crates/xita-harness/src/pricing.rs].
 - 들어오는 돈: AdMob(OAuth, `revenue/admob-daily.json`), Play 판매 보고서(Cloud Storage zip → `revenue/sales-daily.json`, 환불은 음수), 수동 판매 입력. 통화는 환산하지 않고 통화별로 더한다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/sales.rs], [코드: xita-app/core/docs/PORTFOLIO.md].
+- 유료 판매 앱도 제품 카드·상세·현황에서 추이를 본다 (2026-11-02): 제품 행 `sales`(가장 큰 통화의 7일·30일·일별)와 현황 `totals.sales_7d`(통화별). 판매 행은 대표·구성 패키지 모두로 제품에 잇는다. 광고(USD)와 판매를 합친 하나의 수익 숫자는 없다 (환율 미적용) [코드: xita-app/core/crates/xita-daemon/src/portfolio/sales.rs] `product_summaries`.
 - 나중에 제품화한다면 결정 목록 #7.
 
 ## 데이터 모델
@@ -220,6 +222,7 @@ erDiagram
 | 그 밖의 기록 | `decisions`·`insights`·`milestones`·`releases`·`capabilities`·`readiness`·`workbench`(메모)·`reviews`·`references`·`dispatches`·`patches`·`artifacts` [코드: xita-app/core/crates/xita-domain/src/store.rs] | xita_* 도구, xita 데스크탑 | 같음 | 없음 |
 | Approval (proposal kind ACTION) | `proposals` [코드: xita-app/core/crates/xita-domain/src/approvals.rs] | ask | approve, reject, expire, apply | 결과 메모 |
 | Event | `.xita/events.jsonl` (에이전트는 `eventType`, xita-ws는 `event_type` — 필드명이 둘) [코드: xita-app/core/crates/xita-domain/src/store.rs], [코드: xita-app/core/crates/xita-ws/src/operation.rs] | 모든 변경 | 없음(추가만) | 없음 |
+| WorkRun (작업 실행) | 데몬 메모리 + `$XITA_HOME/runs.json` (id·change·cwd·provider·model·effort·command·exited) [코드: xita-app/core/crates/xita-daemon/src/runs.rs] | 작업 시작 | 끝남·닫기·데몬 재시작 때 이어 띄우기 | 없음 (터미널 출력은 메모리 256KB만) |
 | Metric | `monitor/facts.json`(수집 캐시, `issues` 포함)·`revenue/` [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | monitor | monitor | 수익 (조언에는 수치만, 키·경로·코드는 빼고 보낸다) |
 
 ## 6~8. 예외·운영·규제
@@ -234,9 +237,12 @@ erDiagram
 | 예외 | 가져온 GitHub·Linear 이슈는 닫혔는데 할 일은 IDEA·PLAN·BUILD·PAUSED | 수집 때 이슈 주소(`source_url`)로 상태를 보고 `issue-closed` 신호. 할 일은 자동으로 고치지 않는다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] | 2026-11-01 실측(GitHub 공개 이슈). Linear 실호출은 미검증 |
 | 운영 | xita cli 가 시작한 할 일(`xita_work_start`)이 마무리 없이 멈춤 | `agent-stall` 신호 (BUILD 로 4~14일) [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] | 2026-11-01 실측 |
 | 운영 | 키·로그인 만료 (opencode CLI 키 만료 확인됨) | `xita connect`·`/v1/providers`가 키 상태 표시, 키는 `$XITA_HOME/auth.toml`(0600)·키체인 [코드: xita-app/core/crates/xita-harness/src/connect.rs], [코드: xita-app/core/crates/xita-harness/src/secrets.rs] | 2026-10-18 실측 |
+| 운영 | 데몬이 다시 뜨면(업데이트·재부팅·비정상 종료) 작업 터미널이 끊김 | 끝나지 않은 실행을 같은 id 로 다시 띄우고, xita 실행은 할 일의 `agent_session` 을 `-s` 로 이어 "끊긴 곳부터 계속" 을 보낸다. 화면은 20초 동안 다시 붙는다 [코드: xita-app/core/crates/xita-daemon/src/runs.rs] | 2026-11-02 디버그 데몬 재시작 실측 (명령 실행). xita 세션 이어 가기는 단위 테스트만 |
+| 운영 | 외부 서비스(GitHub·Linear) 끊은 뒤 다시 연결 안 됨 | 출처를 id(`env`·`file`·`keychain`·`gh`)로 싣고, 끊기는 auth.toml·키체인 모두 지우며 남는 출처(환경변수·gh 로그인)를 알려 준다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] | 2026-11-02 소유자 제보 |
+| 운영 | xita 데스크탑 제품 채팅 탭에서 앱 종료 | SwiftUI 분할 보기(`.inspector`·`HSplitView`·`VSplitView`)가 레이아웃 갱신 중 AppKit 예외 → 제품 화면에서 분할 보기를 걷고 가로 배치 + 끌어서 폭 조절 [코드: xita-app/desktop/Sources/XitaManage/Views/ProductWorkspace.swift] | 2026-10-31·11-02 크래시 보고 (앱 코드 없는 SplitViewChildController 예외). 재현 테스트로는 안 잡힘 |
 | 운영 | 상시 실행: 세션 끝나면 서버도 꺼짐 | `xitad install` → LaunchAgent `app.xita.xitad`(RunAtLoad·KeepAlive). Xita.app이 열릴 때 등록·복구 [코드: xita-app/core/crates/xita-daemon/src/main.rs], [코드: xita-app/desktop/Sources/Xita/Setup.swift] | 2026-11-01 코드 확인 |
-| 운영 | 모바일 원격 접속 | `xitad serve --listen <주소>` + `daemon.token` 하나. 밖에서 온 세션은 무인 실행(셸 꺼짐). 기기 토큰·xita 모바일앱 클라이언트는 `[미구현]` [코드: xita-app/core/crates/xita-daemon/src/main.rs] | [확인 필요] |
-| 규제 | 스토어 업로드·심사 정책 | 업로드는 항상 승인 | [확인 필요] Play Console 정책 |
+| 운영 | 다른 기기·모바일 원격 접속 | 데몬이 127.0.0.1:4317 에 더해 이 맥의 Tailscale 주소(100.x:4317)에도 붙는다 (소유자 결정 2026-11-03: Tailscale 만, 같은 와이파이·인터넷은 안 염). `daemon.token` 하나, 작업 터미널은 xita 웹이 켜져 있을 때만 다른 기기 허용. 밖에서 온 대화 세션은 무인 실행(셸 꺼짐). 기기 토큰·xita 모바일앱 클라이언트는 `[미구현]` [코드: xita-app/core/crates/xita-daemon/src/main.rs] `spawn_tailscale` | 2026-11-03 실측: 설치 데몬이 100.71.101.6:4317 에서 듣고, 토큰 없이 401·웹 끄면 작업 터미널 403 |
+| 규제 | 스토어 업로드·심사 정책 | 에이전트 업로드는 항상 승인, 사람이 시작하는 프로덕션은 제품 id 재입력. 기본 트랙 internal, 프로덕션은 초안(심사 제출은 `submit` 일 때만, 출시 이력 없는 앱은 초안으로 되돌림). 소유자 도구 planner `deploy.py` 와 같다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/deploy.rs] | planner `docs/deploy-setup.md`·`new-app-playbook.md`. 실제 업로드는 미실행 (트랙 조회만 2026-11-03 실측) |
 | 규제 | AdMob 무효 트래픽(본인 클릭·테스트 광고) | 테스트 광고 신호 감지 (`test-ads`) [코드: xita-app/core/crates/xita-daemon/src/portfolio/advice.rs] | [확인 필요] AdMob 정책 |
 | 규제 | 커뮤니티별 홍보 규칙 | 자동 게시 금지, 규칙은 대장님이 입력. 홍보 초안 기능은 옮기지 않았다 `[미구현]` [코드: xita-app/core/AGENTS.md] | [확인 필요] 각 커뮤니티 |
 | 규제 | 외부 LLM으로 보내는 데이터 | 계획: 민감 작업은 로컬 provider만 (민감도 라우팅 `[미구현]`). 지금: 조언에 키·경로·코드를 빼고 보낸다, 세션 로그는 밖으로 안 보낸다 [코드: xita-app/core/AGENTS.md] | [확인 필요] z.ai·opencode 무료 모델 데이터 정책 |
@@ -290,12 +296,13 @@ flowchart LR
   C -->|"HTTP·SSE"| D
   A -->|"HTTP·SSE"| D
   B -->|"HTTP"| D
-  M -.->|"Tailscale (계획)"| D
+  M -.->|"Tailscale (데몬은 100.x:4317 에서 듣는다)"| D
   D --> W
 ```
 
 - **레퍼런스가 한 방향을 가리킨다.** opencode(서버 하나에 TUI·데스크톱·SDK가 붙음), Codex(app-server를 IDE·데스크톱이 공유), OpenClaw(게이트웨이 하나에 CLI·웹·macOS·모바일·메신저), Claude Code(모바일은 로컬 세션에 붙는 창). 출처: [opencode packages](https://github.com/anomalyco/opencode/tree/dev/packages), [developers.openai.com/codex/app-server](https://developers.openai.com/codex/app-server), [docs.openclaw.ai](https://docs.openclaw.ai/), [code.claude.com/docs/en/mobile](https://code.claude.com/docs/en/mobile).
 - **2026-11-01 코드:** brew cask가 Xita.app을 깔고, 앱 안의 xita·xitad를 PATH에 링크한다. 앱이 열릴 때 `xitad install`로 LaunchAgent를 등록·복구한다(`SMAppService`는 쓰지 않음). xita cli와 xita 데스크탑은 `127.0.0.1:4317`에 HTTP·SSE·Bearer로 붙는다(Unix 소켓 아님). 데몬이 없으면 xita cli는 혼자 돈다 [코드: xita-app/core/Casks/xita.rb], [코드: xita-app/desktop/Sources/Xita/Setup.swift], [코드: xita-app/core/crates/xita-cli/src/backend.rs].
+- **할 일 진행 화면 (2026-11-02):** 제품 화면 머리를 고정 헤더로 두고 '현황 | 만드는 중 | 채팅' 과 분석·정보·더보기·사이드바를 한 자리에 둔다. '만드는 중' 과 사이드바 '작업 보드'(xita 데스크탑·xita 웹)가 xitad `/v1/runs` 터미널을 보여 준다. 작업 터미널은 다른 기기(Tailscale)에서도 토큰 + xita 웹 켜짐이면 보고 시킨다 [코드: xita-app/desktop/Sources/XitaManage/Views/ProductDetailView.swift], [코드: xita-app/core/crates/xita-daemon/web/app.js] `boardPage`.
 - **코어가 둘이던 문제:** xita 데스크탑은 이제 Rust를 링크하지 않고 `/v1/ws/*` HTTP로만 붙는다 [코드: xita-app/desktop/Package.swift]. 남은 것은 Rust 안의 `xita-domain`(에이전트 도구용)과 `xita-ws`(xita 데스크탑용)가 같은 파일 형식을 다른 코드로 쓰는 것이다. 합치기는 남은 일이다 [코드: xita-app/core/AGENTS.md].
 - **(2026-10-21 기록) 현재 XITA는 코어가 둘이다.** TS 서버 [코드: apps/server/app/v4/] 와 Rust 코어 [코드: rust/xita-core/src/] 가 같은 workspace를 각각 쓴다. 데스크톱은 Rust 라이브러리를 절대경로로 링크한다 [코드: macos/XitaApp/Package.swift]. 실제로 이벤트 필드명이 `eventType`과 `event_type`으로 갈라진 흔적이 있다 [코드: apps/server/app/v4/ops.ts]. 15종 타입 parity를 손으로 맞춰야 한다 [코드: rust/xita-core/src/storage.rs].
 
@@ -447,19 +454,23 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | --- | --- | --- |
 | 77b38e1 (+ 미커밋 변경 62개) | 2026-10-21 | apps/server/app/v4/, apps/server/app/portfolio/, apps/server/start/routes.ts, apps/cli/, rust/xita-core/src/, macos/XitaApp/Package.swift, apps/mobile/src/api/ |
 | xita-app/core e72b39e (9-5 절만) | 2026-11-01 | crates/xita-daemon/src/portfolio/ (advice·integrations·mod), crates/xita-daemon/src/main.rs, crates/xita-harness/src/ (jobs·hooks·work_tools·lib), crates/xita-cli/src/tui.rs |
-| **xita-app/core 2ce7655 · xita-app/desktop 3f37c7f (전체 동기화, 현행 기준)** | 2026-11-01 | core: AGENTS.md, Cargo.toml, docs/PORTFOLIO.md, Casks/xita.rb, scripts/release.sh, crates/xita-domain/src/ (store·work·journal), crates/xita-ws/src/ (operation·lifecycle·agent·sync·storage), crates/xita-harness/src/ (config·permissions·kit·memory·hooks·work_tools·tools·connect·secrets·pricing·lib), crates/xita-loop/src/lib.rs, crates/xita-llm/src/, crates/xita-session/src/lib.rs, crates/xita-daemon/src/ (main·ws·web·portfolio/*), crates/xita-cli/src/ (backend·tui·update). desktop: Package.swift, Sources/Xita/Setup.swift, Sources/XitaCoreBridge/. 옛 저장소: apps/mobile/src/api/ |
+| **xita-app/core aecaa16 · xita-app/desktop 48636b6 (2ce7655·3f37c7f 이후 바뀐 파일만, 현행 기준)** | 2026-11-03 | core: crates/xita-daemon/src/ (main(Tailscale 듣기)·web·runs·approvals·planning·providers·devtools·portfolio/{deploy,sales,integrations,mod}·web/app.js), crates/xita-harness/src/ (settings·model_limits·commands·work_tools·secrets·config·lib), crates/xita-cli/src/ (tui·main), docs/PORTFOLIO.md. desktop: Sources/XitaManage/Views/ (WorkRuns·ProductDetailView·ProductWorkspace·SettingsView·TasksView·ChangeDetailView·HomeView), Sources/XitaManage/AppModel.swift, Sources/XitaCoreBridge/Portfolio.swift. 참조: auto-money/planner/tools/deploy.py, planner/docs/deploy-setup.md |
+| xita-app/core 2ce7655 · xita-app/desktop 3f37c7f (전체 동기화) | 2026-11-01 | core: AGENTS.md, Cargo.toml, docs/PORTFOLIO.md, Casks/xita.rb, scripts/release.sh, crates/xita-domain/src/ (store·work·journal), crates/xita-ws/src/ (operation·lifecycle·agent·sync·storage), crates/xita-harness/src/ (config·permissions·kit·memory·hooks·work_tools·tools·connect·secrets·pricing·lib), crates/xita-loop/src/lib.rs, crates/xita-llm/src/, crates/xita-session/src/lib.rs, crates/xita-daemon/src/ (main·ws·web·portfolio/*), crates/xita-cli/src/ (backend·tui·update). desktop: Package.swift, Sources/Xita/Setup.swift, Sources/XitaCoreBridge/. 옛 저장소: apps/mobile/src/api/ |
 
 ## 다음 단계
 
 - 2026-10-21 계획(TS 상시 실행 → Rust `xitad` 골격 → ratatui CLI → TS 기능 이전 → 데스크톱 연결)은 대부분 끝났다. 처음 계획에 있던 Operation·정책표는 아직 없다.
-- 남은 일 (2026-11-02 코드 기준, 정본은 [코드: xita-app/core/AGENTS.md] "남은 일"):
-  1. 홍보 게시·삭제·외부 전송 도구가 생기면 정책표(`approvals::ACTIONS`)에 넣기. 배포·기획 화면을 xita 데스크탑에도 둘지
-  2. TS 서버에만 남은 홍보 초안·planner import
-  3. `xita-domain`과 `xita-ws` 합치기 (`/v1/ws/op` 가 `a: b` 값을 따옴표 없이 써서 xita-domain 이 못 읽는 차이 포함)
-  4. xita 모바일앱 (결정 #4-1): xitad에 붙는 클라이언트와 기기 토큰. 승인 화면은 `/v1/approvals` 를 쓴다
-  5. 민감도 라우팅. 모델 대체 체인은 Runner 턴에만 있다 (서브에이전트·조언 제외)
+- 남은 일 (2026-11-03 코드 기준, 정본은 [코드: xita-app/core/AGENTS.md] "남은 일"):
+  1. 실제 Play 업로드 1회 확인 (internal 트랙부터). 코드는 planner `deploy.py` 와 맞췄고 트랙 조회까지만 실측했다
+  2. 홍보 게시·삭제·외부 전송 도구가 생기면 정책표(`approvals::ACTIONS`)에 넣기. 배포·기획 화면을 xita 데스크탑에도 둘지
+  3. TS 서버에만 남은 홍보 초안·planner import
+  4. `xita-domain`과 `xita-ws` 합치기 (`/v1/ws/op` 가 `a: b` 값을 따옴표 없이 써서 xita-domain 이 못 읽는 차이 포함)
+  5. xita 모바일앱 (결정 #4-1): xitad에 붙는 클라이언트와 기기 토큰. 승인 화면은 `/v1/approvals`, 작업 터미널·웹은 Tailscale 로 이미 열려 있다
+  6. 민감도 라우팅. 모델 대체 순서는 Runner 턴과 기획 위저드에만 있다 (서브에이전트·조언 제외)
+  7. 광고(USD)와 판매(통화별)를 합친 수익 총계 (환율 출처 결정 필요)
 - 2026-11-02 결정 D1(정책표 초안대로)·D2(배포 + 기획 위저드 이전)·D4(하네스 턴 단위 모델 대체) 구현: 승인 대기열 `/v1/approvals` [코드: xita-app/core/crates/xita-daemon/src/approvals.rs], 배포 `/v1/deploy` [코드: xita-app/core/crates/xita-daemon/src/portfolio/deploy.rs], 기획 위저드 `/v1/plans` [코드: xita-app/core/crates/xita-daemon/src/planning.rs], 모델 대체 `[fallback]`, 모델별 최대 창 [코드: xita-app/core/crates/xita-harness/src/model_limits.rs]. 화면: xita 웹 승인·배포 탭·기획, xita 데스크탑 홈 승인.
 - 2026-11-02 끝낸 것: xita cli 제품 추가·기본 필드 수정·인사이트 상태 도구(`xita_product_add`·`xita_product_edit`·`xita_insight_set`, 연동 키·보관·출시 완료는 제외) [코드: xita-app/core/crates/xita-domain/src/records.rs], 세션을 연 화면이 모두 닫을 때만 데몬이 세션을 거두고 xita 데스크탑이 대화 전환·종료 때 close를 보냄 [코드: xita-app/core/crates/xita-daemon/src/main.rs] `close`
+- 2026-11-02~03 끝낸 것: 모델 대체 순서 사용자 지정(`/fallback`·설정 화면), 작업 실행 `/v1/runs`(모델·effort 선택, 앱 안 터미널, 데몬 재시작 이어 가기), 작업 보드(xita 데스크탑·xita 웹), 유료 판매 추이, 외부 서비스 재연결, xita cli Shift+Enter 개행(키보드 확장 지원 터미널), Play 배포를 planner 표준에 맞춤, 제품 화면 고정 헤더·채팅 탭 크래시 수정.
 - 드릴다운 후보: Operation 정책표, 대화 → 기록 정리 규칙, 게이트웨이 프로토콜(OpenAPI).
 
 ## 변경 이력
@@ -476,3 +487,5 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 2026-11-02 | 바로 구현 가능한 남은 일 반영 (core 4d16f71 · desktop 6f5b992) | 다음 단계 |
 | 2026-11-02 | D1·D2·D4 확정과 구현, 모델별 최대 컨텍스트 | 4 숫자 규칙(재시도·자동 반영·승인 만료·모델 창), 결정 #5, 다음 단계 |
 | 2026-11-02 | 모델 대체 순서를 사용자가 지정 (`/fallback`, `PUT /v1/providers/fallback`, 설정 화면) | 4 숫자 규칙(모델 실패 대기), 6~8 표(모델 전부 실패) |
+| 2026-11-03 | 코드 동기화 (core 7fdbd51 · desktop a9938f3): 작업 실행·이어 가기, 작업 보드, 판매 추이, 외부 서비스 재연결, Play 배포 planner 표준, 채팅 탭 크래시 | 2 핵심 루프, 5 돈 흐름, 데이터 모델(WorkRun), 6~8 표(운영 3행·규제 업로드), 9-2 절, 코드 기준, 다음 단계 |
+| 2026-11-03 | 다른 기기 접속은 Tailscale 만 (데몬이 100.x:4317 에도 듣는다), 작업 터미널 원격 허용 | 6~8 표(원격 접속), 9-2 그림·절, 다음 단계, 코드 기준 |
