@@ -142,7 +142,7 @@ Change 수명주기: IDEA·PLAN·BUILD·REVIEW·SHIP_READY·SHIPPED·PAUSED·CAN
 | 규칙 | 공식 후보 | 파라미터 | 기준값 | 설정값화 |
 | --- | --- | --- | --- | --- |
 | 수집·조언 주기 | A: 고정 N시간 / B: 신호 있을 때만 알림(침묵 규약) | `config.toml [portfolio] refresh_hours`, `advice_hours` | 수집 6시간(0이면 끔), 신호가 그대로면 24시간 안에는 AI 조언을 다시 받지 않음 [코드: xita-app/core/crates/xita-harness/src/config.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs]. OpenClaw heartbeat 기본 30분 ([docs.openclaw.ai/gateway/heartbeat](https://docs.openclaw.ai/gateway/heartbeat)) | 예 (구현) |
-| 모델 실패 대기 | A: 고정 cooldown / B: 지수 백오프 | `[retry] attempts·base_ms·max_ms·jitter` | B 구현: 2회, 500ms→최대 10초, jitter 0.1, `Retry-After` 우선, 일시 오류 5종만. 그래도 실패한 턴은 `[fallback] chain` 의 다음 모델로 이어서 돌린다(결정 D4, 하네스 턴 단위, 기본 빈 목록) [코드: xita-app/core/crates/xita-harness/src/config.rs], [코드: xita-app/core/crates/xita-harness/src/lib.rs] `fall_back` | 예 (구현) |
+| 모델 실패 대기 | A: 고정 cooldown / B: 지수 백오프 | `[retry] attempts·base_ms·max_ms·jitter` | B 구현: 2회, 500ms→최대 10초, jitter 0.1, `Retry-After` 우선, 일시 오류 5종만. 그래도 실패한 턴은 모델 대체 순서의 다음 모델로 이어서 돌린다(결정 D4, 하네스 턴 단위, 기본 빈 목록. 순서는 `/fallback`·xita 데스크탑·xita 웹 설정에서 지정 → settings.toml `fallback`, 없으면 `[fallback] chain`) [코드: xita-app/core/crates/xita-harness/src/settings.rs] `fallback_chain`, [코드: xita-app/core/crates/xita-harness/src/config.rs], [코드: xita-app/core/crates/xita-harness/src/lib.rs] `fall_back` | 예 (구현) |
 | 자동 반영 범위 | A: 종류별 정책표 / B: 모델 확신도 임계값 / C: A+B | 작업 종류, 확신도 | A 구현: `[approval] require = ["work.ship", "release.complete", "deploy"]`, 나머지 기록은 바로 쓰고 `xita_undo` [코드: xita-app/core/crates/xita-domain/src/approvals.rs] | 예 (구현) |
 | 승인 만료 | A: 만료 없음 / B: N시간 후 만료 | 만료 시간 | B 구현: `[approval] expire_hours = 24`, 데몬이 30초마다 만료 처리 [코드: xita-app/core/crates/xita-daemon/src/approvals.rs] | 예 (구현) |
 | 모델 창 크기 | A: provider 공통값 / B: 모델별 최대 | 모델별 컨텍스트 | B 구현 (2026-11-02 대장님 요청): models.dev `limit.context` — 같은 provider → 이름이 이어지는 provider → 과반 값, 없으면 공통값. `/context-window` 가 마지막에 덮는다 [코드: xita-app/core/crates/xita-harness/src/model_limits.rs] | 예 (구현) |
@@ -228,7 +228,7 @@ erDiagram
 | --- | --- | --- | --- |
 | 예외 | 잘못 알아들어 엉뚱한 프로젝트에 기록 | 쓰기마다 journal, `xita_undo`로 되돌리기 + 한 줄 보고(`op_id`) [코드: xita-app/core/crates/xita-domain/src/journal.rs] | 코드 |
 | 예외 | 프롬프트 주입: 홍보 댓글·웹 페이지·커밋 메시지 속 지시 | 외부 텍스트는 데이터로만 다루고, 외부 작업은 항상 승인. 지금: 조언 경로는 도구 없이 수치만 받는다. 대화 경로 도구 모드 기본값은 `auto`(묻지 않음) [코드: xita-app/core/crates/xita-harness/src/config.rs] | [확인 필요] |
-| 예외 | 모델 전부 실패 (M5 꺼짐, 쿼터 소진) | 계획: 체인 대체 → 규칙 모드. 지금: 대화는 재시도 뒤 `[fallback] chain` 으로 이어 가고(빈 목록이면 오류), 기획 위저드도 같은 체인 뒤 기본 질문, 조언은 규칙 신호로 대체(`source: "rule"`) [코드: xita-app/core/crates/xita-harness/src/lib.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | 2026-10-18 실측: Alibaba 쿼터 소진 시 xal 300초 대기 |
+| 예외 | 모델 전부 실패 (M5 꺼짐, 쿼터 소진) | 계획: 체인 대체 → 규칙 모드. 지금: 대화는 재시도 뒤 사용자가 정한 모델 대체 순서로 이어 가고(빈 목록이면 오류), 기획 위저드도 같은 체인 뒤 기본 질문, 조언은 규칙 신호로 대체(`source: "rule"`) [코드: xita-app/core/crates/xita-harness/src/lib.rs], [코드: xita-app/core/crates/xita-daemon/src/portfolio/mod.rs] | 2026-10-18 실측: Alibaba 쿼터 소진 시 xal 300초 대기 |
 | 예외 | 여러 화면에서 동시 수정 | 문서 `revision`, `.xita/workspace.lock`(xita-domain·xita-ws 공용), 충돌은 `.xita/conflicts.jsonl` [코드: xita-app/core/crates/xita-ws/src/operation.rs] | 코드 |
 | 예외 | 작은 로컬 모델의 tool calling 불안정 | 기록·분류는 로컬, 복잡한 계획은 z.ai, 실패 시 확인 질문 | [확인 필요] PoC |
 | 예외 | 가져온 GitHub·Linear 이슈는 닫혔는데 할 일은 IDEA·PLAN·BUILD·PAUSED | 수집 때 이슈 주소(`source_url`)로 상태를 보고 `issue-closed` 신호. 할 일은 자동으로 고치지 않는다 [코드: xita-app/core/crates/xita-daemon/src/portfolio/integrations.rs] | 2026-11-01 실측(GitHub 공개 이슈). Linear 실호출은 미검증 |
@@ -475,3 +475,4 @@ O 있음 · △ 부분 · 빈칸 없음/확인 못 함. 출처는 위 9장과 [l
 | 2026-11-01 | DeepSeek Harness Super-agent 설계 대조, 진척 감시(`agent-stall`)·닫힌 이슈(`issue-closed`) 신호 적용 | 9-5 절, 4 숫자 규칙, 6~8 표, 레퍼런스 대조, 결정 #10·#11, 코드 기준, workflow.html `monitor` 단계 |
 | 2026-11-02 | 바로 구현 가능한 남은 일 반영 (core 4d16f71 · desktop 6f5b992) | 다음 단계 |
 | 2026-11-02 | D1·D2·D4 확정과 구현, 모델별 최대 컨텍스트 | 4 숫자 규칙(재시도·자동 반영·승인 만료·모델 창), 결정 #5, 다음 단계 |
+| 2026-11-02 | 모델 대체 순서를 사용자가 지정 (`/fallback`, `PUT /v1/providers/fallback`, 설정 화면) | 4 숫자 규칙(모델 실패 대기), 6~8 표(모델 전부 실패) |
