@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { workspaceRoot } from '#v4/workspace'
 import { atomicWrite, ensureDir, readText } from '#v4/fs_util'
-import { aiChat, extractJson, type ChatMessage } from '#v4/ai_router'
+import { aiChat, extractJson, type ChatMessage, type ContentPart } from '#v4/ai_router'
 import { V4Domain } from '#v4/domain'
 import { V4Ops } from '#v4/ops'
 import { ArtifactStore, createDecision } from '#v4/artifact_store'
@@ -136,6 +136,77 @@ export interface PlanSession {
   product?: string
 }
 
+/*
+ * 변경 전 정책: 위저드 입력은 텍스트 문자열 하나뿐 — 붙여넣은 장문·파일·이미지를 전달할 방법이 없었다.
+ * 변경 후 정책: turn/create 가 attachments 를 받는다. 텍스트(paste·파일)는 본문 블록으로 메시지에
+ *   인라인되고, 이미지는 OpenAI 호환 image_url 파트로 붙는다(vision provider 필요 — ai_router).
+ *   세션 기록(messages)에는 사용자가 입력한 플레이스홀더 문자열만 남고 첨부 원문은 저장하지 않는다
+ *   (base64 가 초안 파일을 부풀리는 걸 막는다. 다음 AI 호출에만 첨부가 전달된다).
+ * 변경 이유: 다른 에이전트 CLI 의 [Image]/[File]/[Paste +N lines] 첨부 UX 를 xita CLI 에 도입.
+ * 영향 범위: POST /v4/plans, POST /v4/plans/:id/turn 요청 바디(attachments 선택). 없으면 기존 동작 불변.
+ */
+export type PlanAttachment =
+  | { kind: 'image'; name?: string; dataUrl: string }
+  | { kind: 'text'; name?: string; content: string }
+
+const MAX_ATTACHMENTS = 8
+const MAX_IMAGE_DATAURL = 6_000_000 // base64 길이 ≈ 원본 4.5MB
+const MAX_TEXT_CHARS = 200_000
+
+/** HTTP 입력(unknown)을 PlanAttachment 로 검증·정규화. 잘못된 첨부는 PlanError */
+export function parseAttachments(input: unknown): PlanAttachment[] {
+  if (input === undefined || input === null) return []
+  if (!Array.isArray(input)) throw new PlanError('attachments 는 배열이어야 합니다')
+  if (input.length > MAX_ATTACHMENTS)
+    throw new PlanError(`첨부는 한 번에 ${MAX_ATTACHMENTS}개까지입니다`)
+  return input.map((raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+      throw new PlanError('첨부 형식이 올바르지 않습니다')
+    const a = raw as Record<string, unknown>
+    const name =
+      typeof a.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 200) : undefined
+    if (a.kind === 'image') {
+      const dataUrl = typeof a.dataUrl === 'string' ? a.dataUrl : ''
+      if (!/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/.test(dataUrl))
+        throw new PlanError('이미지 첨부는 data:image/*;base64 형식의 dataUrl 이어야 합니다')
+      if (dataUrl.length > MAX_IMAGE_DATAURL)
+        throw new PlanError('이미지 첨부가 너무 큽니다 (원본 약 4MB 까지)')
+      return { kind: 'image', name, dataUrl }
+    }
+    if (a.kind === 'text') {
+      const content = typeof a.content === 'string' ? a.content : ''
+      if (!content.trim()) throw new PlanError('텍스트 첨부가 비었습니다')
+      if (content.length > MAX_TEXT_CHARS)
+        throw new PlanError(`텍스트 첨부가 너무 깁니다 (${MAX_TEXT_CHARS}자 까지)`)
+      return { kind: 'text', name, content }
+    }
+    throw new PlanError('첨부 kind 는 image 또는 text 입니다')
+  })
+}
+
+/** 사용자 입력 + 첨부 → AI 에 보낼 content(텍스트 블록 인라인·이미지 파트) 와 기록용 표시 문자열 */
+export function buildUserContent(
+  userText: string,
+  attachments: PlanAttachment[]
+): { display: string; content: string | ContentPart[] } {
+  const blocks: string[] = []
+  const images: ContentPart[] = []
+  for (const a of attachments) {
+    if (a.kind === 'image') {
+      images.push({ type: 'image_url', image_url: { url: a.dataUrl } })
+      continue
+    }
+    const lines = a.content.split('\n').length
+    const label = a.name ? `[File: ${a.name} · ${lines} lines]` : `[Paste · ${lines} lines]`
+    blocks.push(`--- ${label} ---\n${a.content}\n--- /${label} ---`)
+  }
+  const text = [userText.trim(), ...blocks].filter(Boolean).join('\n\n')
+  const content: string | ContentPart[] = images.length
+    ? [{ type: 'text', text: text || '(이미지 첨부만 보냈습니다)' }, ...images]
+    : text
+  return { display: userText, content }
+}
+
 const dir = () => path.join(workspaceRoot(), 'planning')
 const jsonPath = (id: string) => path.join(dir(), `${id}.json`)
 
@@ -252,25 +323,28 @@ function fallbackQuestion(s: PlanSession): TurnOut {
 
 async function aiTurn(
   s: PlanSession,
-  userText: string | null
+  userText: string | null,
+  attachments: PlanAttachment[] = []
 ): Promise<TurnOut & { source: string }> {
   const st = STAGES[s.stage]
   const history: ChatMessage[] = s.messages
     .filter((m) => m.stage === st.key)
     .slice(-12)
     .map((m) => ({ role: m.role, content: m.content }))
+  // 첨부는 이번 호출에만 실린다 — 세션 기록엔 플레이스홀더 문자열만 저장
+  const fallbackText =
+    userText ??
+    (history.length
+      ? '이어서 진행해 주세요.'
+      : `"${st.title}" 단계를 시작합니다. 첫 질문을 해 주세요.`)
+  const finalContent = attachments.length
+    ? buildUserContent(userText ?? '', attachments).content
+    : fallbackText
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM },
     { role: 'user', content: stagePrompt(s) },
     ...history,
-    {
-      role: 'user',
-      content:
-        userText ??
-        (history.length
-          ? '이어서 진행해 주세요.'
-          : `"${st.title}" 단계를 시작합니다. 첫 질문을 해 주세요.`),
-    },
+    { role: 'user', content: finalContent },
   ]
   const out = await aiChat({ task: 'plan', json: true, messages, temperature: 0.5 })
   if (out) {
@@ -315,7 +389,7 @@ function assertDrafting(s: PlanSession) {
     throw new PlanError(s.status === 'confirmed' ? '이미 확정된 기획입니다' : '중단된 기획입니다')
 }
 
-export async function createPlan(idea?: string) {
+export async function createPlan(idea?: string, attachments: PlanAttachment[] = []) {
   const now = new Date().toISOString()
   const s: PlanSession = {
     id: `plan-${now.slice(0, 10).replaceAll('-', '')}-${crypto.randomBytes(3).toString('hex')}`,
@@ -328,26 +402,27 @@ export async function createPlan(idea?: string) {
     ready: {},
     messages: [],
   }
-  if (idea?.trim()) {
-    s.messages.push({ role: 'user', content: idea.trim(), stage: 'name', at: now })
+  const text = idea?.trim() ?? ''
+  if (text || attachments.length) {
+    s.messages.push({ role: 'user', content: text || '(첨부로 시작)', stage: 'name', at: now })
   }
-  applyTurn(s, await aiTurn(s, idea?.trim() || null))
+  applyTurn(s, await aiTurn(s, text || null, attachments))
   await save(s)
   return s
 }
 
-export async function planTurn(id: string, message: string) {
+export async function planTurn(id: string, message: string, attachments: PlanAttachment[] = []) {
   const s = await getPlan(id)
   assertDrafting(s)
   const text = message.trim()
-  if (!text) throw new PlanError('메시지가 비었습니다')
+  if (!text && !attachments.length) throw new PlanError('메시지가 비었습니다')
   s.messages.push({
     role: 'user',
-    content: text,
+    content: text || '(첨부만 보냄)',
     stage: STAGES[s.stage].key,
     at: new Date().toISOString(),
   })
-  applyTurn(s, await aiTurn(s, text))
+  applyTurn(s, await aiTurn(s, text || null, attachments))
   await save(s)
   return s
 }

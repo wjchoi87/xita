@@ -9,6 +9,7 @@ import {
   createPlan,
   getPlan,
   listPlans,
+  parseAttachments,
   planPatch,
   planStage,
   planTurn,
@@ -53,10 +54,11 @@ export default class PlanningController {
 
   async create(ctx: HttpContext) {
     const idea = ctx.request.input('idea')
+    const attachments = parseAttachments(ctx.request.input('attachments'))
     return handle(
       ctx,
       async () => {
-        const s = await createPlan(idea ? String(idea) : undefined)
+        const s = await createPlan(idea ? String(idea) : undefined, attachments)
         return view(s.id)
       },
       true
@@ -64,10 +66,11 @@ export default class PlanningController {
   }
 
   async turn(ctx: HttpContext) {
+    const attachments = parseAttachments(ctx.request.input('attachments'))
     return handle(
       ctx,
       async () => {
-        await planTurn(ctx.params.id, String(ctx.request.input('message') ?? ''))
+        await planTurn(ctx.params.id, String(ctx.request.input('message') ?? ''), attachments)
         return view(ctx.params.id)
       },
       true

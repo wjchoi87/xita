@@ -51,6 +51,8 @@ export interface ProviderConfig {
   apiKeyCommand?: string[]
   /** 요청 본문에 그대로 합칠 값 (예: {"reasoning_effort":"none"}) */
   extraBody?: Record<string, unknown>
+  /** http 전용 — 모든 모델이 image_url 콘텐츠 파트를 받아들인다 (OpenAI 호환 vision). 이미지 첨부 시에만 이 provider 들이 쓰인다 */
+  vision?: boolean
   // cli
   /** argv 템플릿. {model} 치환. 프롬프트는 stdin 으로 넘긴다 (셸을 거치지 않음) */
   command?: string[]
@@ -69,9 +71,21 @@ export interface AIConfig {
   routes: Partial<Record<AITask, RouteStep[]>>
 }
 
+/*
+ * 변경 전 정책: ChatMessage.content 는 문자열뿐 — 이미지 등 멀티모달 입력을 표현할 수 없었다.
+ * 변경 후 정책: content 는 문자열 또는 OpenAI 호환 파트 배열({type:'text'} | {type:'image_url'})이다.
+ *   http provider 는 파트를 그대로 전송하고, cli provider(flattenMessages)는 텍스트만 펴고
+ *   이미지는 생략 마커로 남긴다. vision 플래그가 붙은 http provider 가 있으면 이미지가 있는
+ *   요청은 그 체인으로만 가고, 없으면 이미지를 떼고 텍스트만으로 기존 체인을 쓴다.
+ * 변경 이유: CLI 기획 위저드의 [Image]/[File]/[Paste] 첨부를 AI 가 실제로 볼 수 있게.
+ * 영향 범위: content 가 배열인 메시지를 넣는 호출부(기획 위저드). 문자열만 쓰는 기존 호출부는 변화 없음.
+ */
+export type ContentPart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | ContentPart[]
 }
 
 export interface ChatRequest {
@@ -322,13 +336,52 @@ async function callHttp(p: ProviderConfig, model: string, req: ChatRequest) {
   }
 }
 
+/** 파트/문자열 혼용 content 에서 텍스트만 뽑는다 */
+export function messageText(m: ChatMessage): string {
+  if (typeof m.content === 'string') return m.content
+  return m.content
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('\n')
+}
+
+export function hasImages(messages: ChatMessage[]): boolean {
+  return messages.some(
+    (m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')
+  )
+}
+
+/** 이미지 파트를 생략 마커로 바꿔 텍스트 전용 체인에서도 대화가 성립하게 한다 */
+export function stripImages(messages: ChatMessage[]): ChatMessage[] {
+  let n = 0
+  return messages.map((m) => {
+    if (typeof m.content === 'string') return m
+    const parts = m.content.map((p) =>
+      p.type === 'image_url'
+        ? ({ type: 'text', text: `[Image #${++n} 생략 — vision 모델 미설정]` } as ContentPart)
+        : p
+    )
+    // 텍스트 파트만 남으면 문자열로 되돌린다(기존 경로와 동일한 형태)
+    const onlyText = parts.every((p) => p.type === 'text')
+    return {
+      ...m,
+      content: onlyText ? parts.map((p) => (p as { text: string }).text).join('\n') : parts,
+    }
+  })
+}
+
 /** CLI 는 단일 프롬프트만 받으므로 대화를 하나의 텍스트로 편다 */
 export function flattenMessages(messages: ChatMessage[], json?: boolean): string {
   const parts: string[] = []
   for (const m of messages) {
-    if (m.role === 'system') parts.push(`[지시]\n${m.content}`)
-    else if (m.role === 'user') parts.push(`[사용자]\n${m.content}`)
-    else parts.push(`[이전 답변]\n${m.content}`)
+    const images = Array.isArray(m.content)
+      ? m.content.filter((p) => p.type === 'image_url').length
+      : 0
+    const text = messageText(m)
+    const note = images ? `\n(이미지 ${images}장 첨부 — CLI provider 는 볼 수 없음)` : ''
+    if (m.role === 'system') parts.push(`[지시]\n${text}${note}`)
+    else if (m.role === 'user') parts.push(`[사용자]\n${text}${note}`)
+    else parts.push(`[이전 답변]\n${text}`)
   }
   parts.push(
     json
@@ -433,6 +486,11 @@ export async function chainFor(task: AITask, sensitive = false) {
     .filter((x) => !sensitive || x.provider.local === true)
 }
 
+/** 이미지 첨부 요청이 갈 수 있는 provider 만 남긴다 (http + vision:true — cli 는 이미지를 못 받는다) */
+export function visionChainOf(chain: Array<{ step: RouteStep; provider: ProviderConfig }>) {
+  return chain.filter((x) => x.provider.kind === 'http' && x.provider.vision === true)
+}
+
 /** 작업 체인을 순서대로 시도. 전부 실패하면 null (호출부가 규칙 기반 대체 경로를 쓴다) */
 export async function aiChat(req: ChatRequest): Promise<ChatResult | null> {
   let chain = await chainFor(req.task, req.sensitive)
@@ -442,6 +500,16 @@ export async function aiChat(req: ChatRequest): Promise<ChatResult | null> {
       (x) => x.id === req.only!.provider
     )
     chain = p ? [{ step: req.only, provider: p }] : []
+  }
+  /*
+   * 이미지가 붙은 요청: vision 가능(http+vision) provider 체인으로 좁히고,
+   * 그런 provider 가 없으면 이미지를 생략 마커로 바꿔 기존 텍스트 체인으로 보낸다.
+   */
+  let effReq = req
+  if (hasImages(req.messages)) {
+    const visionChain = visionChainOf(chain)
+    if (visionChain.length) chain = visionChain
+    else effReq = { ...req, messages: stripImages(req.messages) }
   }
   const attempts: ChatResult['attempts'] = []
   for (const { step, provider } of chain) {
@@ -458,8 +526,8 @@ export async function aiChat(req: ChatRequest): Promise<ChatResult | null> {
     try {
       const out =
         provider.kind === 'http'
-          ? await callHttp(provider, step.model, req)
-          : await callCli(provider, step.model, req)
+          ? await callHttp(provider, step.model, effReq)
+          : await callCli(provider, step.model, effReq)
       if (!out.text.trim()) throw new ProviderError('빈 응답')
       if (req.json && extractJson(out.text) === null) throw new ProviderError('JSON 아님')
       const ms = Date.now() - t0

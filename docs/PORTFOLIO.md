@@ -146,13 +146,15 @@ interface Job { id: string; label: string; project: string | null; done: boolean
 | Method | Path | Body | 응답 |
 |---|---|---|---|
 | GET | `/plans` | | 목록 |
-| POST | `/plans` | `{ idea? }` | 세션(첫 질문 포함) |
+| POST | `/plans` | `{ idea?, attachments? }` | 세션(첫 질문 포함) |
 | GET | `/plans/:id` | | `{ ...세션, stages, markdown, problems(확정 막는 것), gaps(비어 있는 단계) }` |
-| POST | `/plans/:id/turn` | `{ message }` | 세션 |
+| POST | `/plans/:id/turn` | `{ message, attachments? }` | 세션 |
 | POST | `/plans/:id/stage` | `{ to: next\|prev\|<key> }` | 세션 |
 | POST | `/plans/:id/patch` | `{ draft: {...} }` | 세션 (AI 없이 초안 수정) |
 | POST | `/plans/:id/confirm` | | `{ plan, product, milestones }` — Product(코드네임)·기획서 artifact·수익모델 decision·마일스톤·할 일 생성 |
 | POST | `/plans/:id/abandon` | | 세션 |
+
+`attachments`(create/turn) — CLI 첨부(`[Image #N]`/`[File]`/`[Paste +N lines]` 플레이스홀더와 함께): `[{kind:'image', name?, dataUrl: data:image/*;base64}, {kind:'text', name?, content}]`, 최대 8개. 텍스트는 메시지에 인라인, 이미지는 vision provider(`vision: true` 인 http provider)로 전송 — 없으면 생략 마커로 대체. 첨부 원문은 세션 파일에 저장되지 않고 해당 AI 호출에만 전달된다.
 
 **AI 라우터** — `/api/v1/v4/ai/*`. 설정 `<workspace>/.xita/ai.json` (없으면 기본값), 사용 기록 `.xita/ai_usage.jsonl`.
 
@@ -160,7 +162,8 @@ interface Job { id: string; label: string; project: string | null; done: boolean
 {
   "providers": [
     { "id": "m5", "kind": "http", "local": true, "baseUrl": "http://bossgame-m5:4000/v1", "apiKeyEnv": "LITELLM_API_KEY", "models": ["qwen38-27b-uncensored"] },
-    { "id": "opencode-free", "kind": "cli", "command": ["xal","run","--format","json","--mode","plan","--provider","opencode-free","--model","{model}"], "output": "xal-json", "models": ["zen/glm-5.3-flash-free"] }
+    { "id": "opencode-free", "kind": "cli", "command": ["xal","run","--format","json","--mode","plan","--provider","opencode-free","--model","{model}"], "output": "xal-json", "models": ["zen/glm-5.3-flash-free"] },
+    { "id": "ollama-vision", "kind": "http", "local": true, "vision": true, "baseUrl": "http://127.0.0.1:11434/v1", "models": ["llava:13b"] }
   ],
   "routes": { "plan": [{ "provider": "zai", "model": "glm-5.3" }, { "provider": "m5", "model": "qwen38-27b-uncensored" }] }
 }
@@ -168,6 +171,7 @@ interface Job { id: string; label: string; project: string | null; done: boolean
 - 작업: `classify · summarize · ask · plan · monitor · advice · promo`. 체인을 앞에서부터 시도, 실패한 provider/model 은 10분 쉼.
 - `sensitive` 작업(수익 조언)은 `local: true` provider 만. 키 값은 저장하지 않음 (`apiKeyEnv` / `apiKeyCommand`).
 - cli provider 는 셸 없이 실행, 프롬프트는 stdin, 작업 폴더 `.xita/ai_sandbox`.
+- `vision: true` 인 http provider 는 이미지 첨부(기획 위저드 `[Image]`)가 붙은 요청을 처리한다 — 이런 provider 가 없으면 이미지는 생략 마커로 바뀌고 텍스트만 전송된다.
 
 | Method | Path | Body | 응답 |
 |---|---|---|---|

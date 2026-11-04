@@ -21,6 +21,8 @@ const bodyParserConfig = defineConfig({
    */
   json: {
     convertEmptyStringsToNull: true,
+    // 기획 위저드 attachments(이미지 base64 dataUrl) — 최대 첨부 8개·개별 cap 은 planning.parseAttachments 가 검증
+    limit: '16mb',
     types: [
       'application/json',
       'application/json-patch+json',

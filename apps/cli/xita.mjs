@@ -173,7 +173,7 @@ function usage() {
   xita plan new ["아이디어 한 줄"]             새 기획 시작
   xita plan resume [ID]                       이어 하기
   xita plan show ID                           기획서 보기 (markdown)
-    대화 중: 번호=선택지 고르기 · /다음 · /뒤로 · /요약 · /확정 · /중단 · /나가기(저장 후 종료)
+    대화 중: 번호=선택지 고르기 · 장문 붙여넣기=[Paste +N lines]·Ctrl+V=[Image]·@파일=[File] 첨부 · /다음 · /뒤로 · /요약 · /확정 · /중단 · /나가기(저장 후 종료)
 
   조언 (상시 모니터링 — 서버가 6시간마다 수익·출시·작업을 점검)
   xita advice [--run]                         최신 조언 (--run = 지금 점검, 수십 초~몇 분)
@@ -375,21 +375,203 @@ function planShowLast(p) {
   return opts
 }
 
+// ---- 첨부 입력 에디터 (attach.mjs 참조) ----------------------------------------
+
+const { TextDecoder } = await import('node:util')
+const { PasteSplitter, shouldAttachPaste, readClipboardImage, resolveFileTokens } = await import(
+  './attach.mjs'
+)
+
+/*
+ * 변경 전 정책: 위저드 입력은 readline question() — 장문 붙여넣기가 통째로 한 줄로 들어가고
+ *   클립보드 이미지·파일 첨부는 불가능했다.
+ * 변경 후 정책: 원시 입력 에디터. 브래킷 paste 장문은 [Paste #N +L lines] 플레이스홀더로,
+ *   Ctrl+V 클립보드 이미지는 [Image #N], @파일 토큰은 [File: 이름] 으로 바꾸고 원본은
+ *   attachments 로 서버에 함께 보낸다 (POST /v4/plans* · vision provider 필요).
+ * 변경 이유: 다른 에이전트 CLI 의 첨부 UX 를 xita CLI 기획 위저드에 도입.
+ * 영향 범위: planLoop 와 plan new 의 입력. TTY 가 아니면 readline 으로 자동 폴백(@파일만 동작).
+ */
+async function askAttached(prompt, { onCancel } = {}) {
+  const finishWith = async (line) => {
+    const r = await resolveFileTokens(line, process.cwd())
+    for (const n of r.notes) console.log(`  ! ${n}`)
+    return r
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    const { createInterface } = await import('node:readline/promises')
+    const rl = createInterface({ input: process.stdin, output: process.stdout })
+    const line = await rl.question(prompt).catch(() => null)
+    rl.close()
+    if (line === null) return onCancel ? (onCancel(), null) : process.exit(0)
+    return finishWith(line)
+  }
+
+  const stdin = process.stdin
+  const dec = new TextDecoder('utf-8')
+  const splitter = new PasteSplitter()
+  let line = ''
+  let cur = 0
+  let imgN = 0
+  let pasteN = 0
+  const attachments = []
+
+  stdin.setRawMode(true)
+  stdin.resume()
+  process.stdout.write('\x1b[?2004h') // 브래킷 paste 켜기
+
+  const visible = () => {
+    const width = (process.stdout.columns ?? 80) - 8
+    return [...line].length > width ? '…' + [...line].slice(-width).join('') : line
+  }
+  const render = () => {
+    process.stdout.write(`\r\x1b[K${prompt}${visible()}`)
+  }
+  const note = (msg) => {
+    process.stdout.write(`\r\x1b[K  ${msg}\n`)
+    render()
+  }
+  const insert = (s) => {
+    // code point 단위로 다룬다 — 이모지(서로게이트 페어)가 섞여도 커서가 안 깨진다
+    const arr = [...line]
+    arr.splice(cur, 0, s)
+    line = arr.join('')
+    cur += [...s].length
+  }
+
+  const result = await new Promise((resolve) => {
+    let finished = false
+    const cleanup = () => {
+      process.stdout.write('\x1b[?2004l')
+      stdin.setRawMode(false)
+      stdin.pause()
+      stdin.off('data', onData)
+      stdin.off('end', onEnd)
+    }
+    const done = (v) => {
+      finished = true
+      cleanup()
+      resolve(v)
+    }
+    const onEnd = () => done(null)
+    // Ctrl+V 클립보드 읽기(osascript 실행) 중에도 키가 유실되지 않게 청크를 직렬로 처리한다
+    let chain = Promise.resolve()
+    const onData = (chunk) => {
+      chain = chain.then(() => processChunk(chunk))
+    }
+    const processChunk = async (chunk) => {
+      if (finished) return
+      splitter.feed(dec.decode(chunk, { stream: true }))
+      // 붙여넣기 덩어리를 먼저 처리한다 — paste 와 Enter 가 한 청크로 와도 플레이스홀더가 빠지지 않게
+      for (const p of splitter.pastes.splice(0)) {
+        const { attach, lines } = shouldAttachPaste(p)
+        if (attach) {
+          pasteN++
+          attachments.push({ kind: 'text', name: undefined, content: p })
+          insert(`[Paste #${pasteN} +${lines} lines]`)
+          note(`+ [Paste #${pasteN}]  ${lines}줄 ${[...p].length}자`)
+        } else {
+          insert(p.replace(/\r?\n/g, ' '))
+        }
+      }
+      const chars = splitter.chars
+      splitter.chars = ''
+      let i = 0
+      while (i < chars.length) {
+        const c = chars[i]
+        if (c === '\r' || c === '\n') {
+          process.stdout.write('\n')
+          done(line)
+          return
+        }
+        if (c === '\x03') {
+          cleanup()
+          if (onCancel) return onCancel()
+          process.exit(130)
+        }
+        if (c === '\x04') {
+          if (!line) {
+            cleanup()
+            if (onCancel) return onCancel()
+            process.exit(0)
+          }
+          const arr = [...line]
+          arr.splice(cur, 1)
+          line = arr.join('')
+        } else if (c === '\x7f') {
+          if (cur > 0) {
+            const arr = [...line]
+            arr.splice(cur - 1, 1)
+            line = arr.join('')
+            cur--
+          }
+        } else if (c === '\x15') {
+          line = ''
+          cur = 0
+        } else if (c === '\x01') {
+          cur = 0
+        } else if (c === '\x05') {
+          cur = [...line].length
+        } else if (c === '\x16') {
+          // Ctrl+V — 클립보드 이미지 첨부
+          const r = await readClipboardImage()
+          if (r && r.error) note(r.error)
+          else if (r) {
+            imgN++
+            attachments.push({ kind: 'image', name: `clipboard-${imgN}.png`, dataUrl: r.dataUrl })
+            insert(`[Image #${imgN}]`)
+            note(`+ [Image #${imgN}]  ${r.mime}  ${(r.bytes / 1024).toFixed(1)}KB`)
+          } else note('클립보드에 이미지가 없어요')
+        } else if (c === '\x1b') {
+          const seq = chars.slice(i, i + 3)
+          if (seq === '\x1b[D') {
+            cur = Math.max(0, cur - 1)
+            i += 2
+          } else if (seq === '\x1b[C') {
+            cur = Math.min([...line].length, cur + 1)
+            i += 2
+          } else {
+            // 그외 CSI 시퀀스(위·아래·Home 등)는 종결 문자까지 건너뛴다 — 제어 문자(\r 등)가 오면 거기서 멈춘다
+            let j = i + 1
+            while (j < chars.length && !/[A-Za-z~]/.test(chars[j]) && chars[j] >= ' ') j++
+            i = j
+          }
+        } else if (c >= ' ') {
+          insert(c)
+        }
+        i++
+      }
+      render()
+    }
+    stdin.on('data', onData)
+    stdin.on('end', onEnd)
+    render()
+  })
+
+  if (result === null) {
+    if (onCancel) onCancel()
+    return null
+  }
+  const r = await finishWith(result)
+  return { ...r, attachments: [...attachments, ...r.attachments] }
+}
+
 async function planLoop(p) {
-  const { createInterface } = await import('node:readline/promises')
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
   const bye = () => {
     console.log(`\n저장됐어요. 이어 하려면: xita plan resume ${p.id}`)
     process.exit(0)
   }
-  rl.on('SIGINT', bye)
-  // 입력이 끝나면(Ctrl+D·파이프 종료) 저장 상태로 끝낸다
-  const ask = (q) => rl.question(q).catch(() => bye())
+  // 입력이 끝나면(Ctrl+D·파이프 종료) 저장 상태로 끝낸다 — 에디터가 취소를 알려온다
+  const ask = async (q) => (await askAttached(q, { onCancel: bye })) ?? { text: '', attachments: [] }
   planHeader(p)
   let opts = planShowLast(p)
+  console.log('  (붙여넣은 장문·Ctrl+V 이미지·@파일 을 첨부로 보낼 수 있어요 — /도움)')
   for (;;) {
-    const ans = (await ask('\n› ')).trim()
-    if (!ans) continue
+    const { text: raw, attachments } = await ask('\n› ')
+    const ans = raw.trim()
+    if (!ans && !attachments.length) continue
+    if (ans.startsWith('/') && attachments.length)
+      console.log('  (명령에는 첨부를 못 실어요 — 답변으로 보내 주세요)')
     const cmd = ans.toLowerCase()
     try {
       if (['/나가기', '/exit', '/quit', '/q'].includes(cmd)) {
@@ -397,7 +579,9 @@ async function planLoop(p) {
         break
       }
       if (['/도움', '/help', '/?'].includes(cmd)) {
-        console.log('번호=선택지 · 자유롭게 답하기 · /다음 · /뒤로 · /요약 · /확정 · /중단 · /나가기')
+        console.log(
+          '번호=선택지 · 자유롭게 답하기 · 장문 붙여넣기/Ctrl+V 이미지/@파일=첨부 · /다음 · /뒤로 · /요약 · /확정 · /중단 · /나가기'
+        )
         continue
       }
       if (['/요약', '/summary', '/show'].includes(cmd)) {
@@ -429,7 +613,7 @@ async function planLoop(p) {
         }
         console.log(`\n${cur.markdown}`)
         if (cur.gaps?.length) console.log(`아직 비어 있는 단계: ${cur.gaps.join(', ')} — 지금 확정해도 되고, 나중에 기획서를 고쳐도 돼요.`)
-        const ok = (await ask('이 기획으로 프로젝트를 만들까요? 제품·마일스톤·할 일이 생성돼요 (yes/no): ')).trim().toLowerCase()
+        const ok = ((await ask('이 기획으로 프로젝트를 만들까요? 제품·마일스톤·할 일이 생성돼요 (yes/no): ')).text).trim().toLowerCase()
         if (!['y', 'yes', '네', 'ㅇ', '예'].includes(ok)) continue
         const r = await call('POST', `/v4/plans/${p.id}/confirm`, {})
         console.log(`\n확정했어요 → 제품 ${r.product}`)
@@ -438,7 +622,7 @@ async function planLoop(p) {
         break
       }
       if (['/중단', '/abandon'].includes(cmd)) {
-        const ok = (await ask('이 기획을 중단할까요? (초안은 남아요) (yes/no): ')).trim().toLowerCase()
+        const ok = ((await ask('이 기획을 중단할까요? (초안은 남아요) (yes/no): ')).text).trim().toLowerCase()
         if (!['y', 'yes', '네', 'ㅇ', '예'].includes(ok)) continue
         await call('POST', `/v4/plans/${p.id}/abandon`, {})
         console.log('중단했어요.')
@@ -451,7 +635,9 @@ async function planLoop(p) {
       const n = Number(ans)
       const message = Number.isInteger(n) && n >= 1 && n <= opts.length ? opts[n - 1] : ans
       if (message !== ans) console.log(`  → ${message}`)
-      p = await planCall(() => call('POST', `/v4/plans/${p.id}/turn`, { message }))
+      p = await planCall(() =>
+        call('POST', `/v4/plans/${p.id}/turn`, { message, attachments })
+      )
       const st = p.stages[p.stage].key
       opts = planShowLast(p)
       if (p.ready?.[st] && p.stage < p.stages.length - 1) console.log('  (이 단계는 충분해요 — /다음 으로 넘어가요)')
@@ -459,7 +645,6 @@ async function planLoop(p) {
       console.log(`문제가 생겼어요: ${e.message}`)
     }
   }
-  rl.close()
 }
 
 async function main() {
@@ -940,15 +1125,19 @@ async function main() {
           console.log('최근 끝난 기획')
           for (const x of done) console.log(`     ${pad(x.name, 24)}${x.status === 'confirmed' ? `확정 → ${x.product}` : '중단'}`)
         }
-        const { createInterface } = await import('node:readline/promises')
-        const rl = createInterface({ input: process.stdin, output: process.stdout })
-        const ans = (await rl.question(`\n${open.length ? '번호=이어 하기 · ' : ''}새로 시작하려면 아이디어 한 줄 (Enter=취소): `)).trim()
-        rl.close()
-        if (!ans) return
+        const r = await askAttached(
+          `\n${open.length ? '번호=이어 하기 · ' : ''}새로 시작하려면 아이디어 한 줄 (Enter=취소): `,
+          { onCancel: () => process.exit(0) }
+        )
+        if (r === null || (!r.text.trim() && !r.attachments.length)) return
+        const ans = r.text.trim()
         const n = Number(ans)
         if (Number.isInteger(n) && open[n - 1]) id = open[n - 1].id
         else {
-          const p = await planCall(() => post('/v4/plans', { idea: ans }), '기획을 시작하는 중')
+          const p = await planCall(
+            () => post('/v4/plans', { idea: ans, attachments: r.attachments }),
+            '기획을 시작하는 중'
+          )
           console.log(`새 기획 ${p.id}`)
           await planLoop(p)
           return
